@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../../SupplierNetwork"
+		},
+		{
+			"path": "../../../../DMS-Work/dms-erp-api"
+		}
+	],
+	"settings": {}
+}
