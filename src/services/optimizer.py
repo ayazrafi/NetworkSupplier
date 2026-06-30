@@ -193,10 +193,15 @@ class OptimizerService:
                     id_col = df_veh.columns[0]
                     
                 if id_col:
-                    col_10 = next((c for c in df_veh.columns if '10 l' in str(c).lower()), None)
-                    col_12 = next((c for c in df_veh.columns if '12l' in str(c).lower() or '12 l' in str(c).lower()), None)
-                    col_15 = next((c for c in df_veh.columns if '15 l' in str(c).lower()), None)
-                    col_18 = next((c for c in df_veh.columns if '18 l' in str(c).lower()), None)
+                    col_10 = next((c for c in df_veh.columns if '10 l' in str(c).lower() and 'leave' not in str(c).lower()), None)
+                    col_12 = next((c for c in df_veh.columns if ('12l' in str(c).lower() or '12 l' in str(c).lower()) and 'leave' not in str(c).lower()), None)
+                    col_15 = next((c for c in df_veh.columns if '15 l' in str(c).lower() and 'leave' not in str(c).lower()), None)
+                    col_18 = next((c for c in df_veh.columns if '18 l' in str(c).lower() and 'leave' not in str(c).lower()), None)
+                    
+                    col_lq_10 = next((c for c in df_veh.columns if '10 l' in str(c).lower() and 'leave' in str(c).lower()), None)
+                    col_lq_12 = next((c for c in df_veh.columns if ('12l' in str(c).lower() or '12 l' in str(c).lower()) and 'leave' in str(c).lower()), None)
+                    col_lq_15 = next((c for c in df_veh.columns if '15 l' in str(c).lower() and 'leave' in str(c).lower()), None)
+                    col_lq_18 = next((c for c in df_veh.columns if '18 l' in str(c).lower() and 'leave' in str(c).lower()), None)
                     
                     col_strat = next((c for c in df_veh.columns if 'strategy' in str(c).lower()), None)
                     col_margin_low = next((c for c in df_veh.columns if 'flowlowmargin' in str(c).lower().replace(' ', '').replace('_', '')), None)
@@ -213,6 +218,11 @@ class OptimizerService:
                                 '15 L': float(row[col_15]) if col_15 and pd.notna(row[col_15]) else 1000.0,
                                 '18 L': float(row[col_18]) if col_18 and pd.notna(row[col_18]) else 1000.0
                             }
+                            lq_10 = float(row[col_lq_10]) if col_lq_10 and pd.notna(row[col_lq_10]) else 0.0
+                            lq_12 = float(row[col_lq_12]) if col_lq_12 and pd.notna(row[col_lq_12]) else 0.0
+                            lq_15 = float(row[col_lq_15]) if col_lq_15 and pd.notna(row[col_lq_15]) else 0.0
+                            lq_18 = float(row[col_lq_18]) if col_lq_18 and pd.notna(row[col_lq_18]) else 0.0
+                            
                             strategy = str(row[col_strat]).strip() if col_strat and pd.notna(row[col_strat]) else "Whole Milk Supply"
                             margin_low = float(row[col_margin_low]) if col_margin_low and pd.notna(row[col_margin_low]) else 5.0
                             margin_high = float(row[col_margin_high]) if col_margin_high and pd.notna(row[col_margin_high]) else 5.0
@@ -221,6 +231,12 @@ class OptimizerService:
                             
                             vehicle_limits_map[bmc_id] = {
                                 'limits': limits,
+                                'leave_quantities': {
+                                    '10 L': lq_10,
+                                    '12L': lq_12,
+                                    '15 L': lq_15,
+                                    '18 L': lq_18
+                                },
                                 'strategy': strategy,
                                 'margin': margin_low,
                                 'margin_low': margin_low,
@@ -235,7 +251,7 @@ class OptimizerService:
         return vehicle_limits_map
 
     @staticmethod
-    def get_optimal_vehicles(flow: float, vehicle_limits: Dict[str, float], distance: Optional[float] = None, strategy: str = 'Whole Milk Supply', margin: float = 5.0) -> Dict[str, int]:
+    def get_optimal_vehicles_fallback(flow: float, vehicle_limits: Dict[str, float], distance: Optional[float] = None, strategy: str = 'Whole Milk Supply', margin: float = 5.0) -> Dict[str, int]:
         if flow <= 0:
             return {}
             
@@ -243,6 +259,7 @@ class OptimizerService:
         if distance is not None:
             is_long = (distance > 150.0)
             
+        # Target flow based on strategy
         target_flow = flow
         if strategy == 'Least Vehicle':
             target_flow = flow * (1.0 - (margin / 100.0))
@@ -255,6 +272,7 @@ class OptimizerService:
         else:
             order = [('10 L', 10000), ('12L', 12000), ('15 L', 15000), ('18 L', 18000)]
             
+        # Filter order to only vehicle types that have limit > 0
         active_order = []
         for cap_name, cap_val in order:
             limit = int(vehicle_limits.get(cap_name, 1000))
@@ -265,6 +283,7 @@ class OptimizerService:
             if rem <= 0:
                 break
                 
+            # Check if the remaining flow can be covered by a single available vehicle of any active type
             single_veh_candidates = []
             for name, val, lim in active_order:
                 avail = lim - res.get(name, 0)
@@ -277,6 +296,7 @@ class OptimizerService:
                 break
                 
             if rem <= cap_val:
+                # Check if there is any smaller vehicle type in active_order that can also cover rem
                 has_smaller_covering = False
                 for next_name, next_cap, next_limit in active_order[idx+1:]:
                     if next_cap < cap_val and next_cap >= rem:
@@ -308,6 +328,97 @@ class OptimizerService:
                     rem -= taken * cap_val
                     
         return {k: v for k, v in res.items() if v > 0}
+
+    @classmethod
+    def get_optimal_vehicles(cls, flow: float, vehicle_limits: Dict[str, float], distance: Optional[float] = None, strategy: str = 'Whole Milk Supply', margin: float = 5.0) -> Dict[str, int]:
+        if flow <= 0:
+            return {}
+            
+        is_long = False
+        if distance is not None:
+            is_long = (distance > 150.0)
+            
+        # Target flow based on strategy
+        target_flow = flow
+        if strategy == 'Least Vehicle':
+            target_flow = flow * (1.0 - (margin / 100.0))
+            
+        if is_long:
+            # High capacity vehicles preferred for long distance: 18 L > 15 L > 12L > 10 L
+            pref_order = [('18 L', 18000), ('15 L', 15000), ('12L', 12000), ('10 L', 10000)]
+        else:
+            # Low capacity vehicles preferred for short distance: 10 L > 12L > 15 L > 18 L
+            pref_order = [('10 L', 10000), ('12L', 12000), ('15 L', 15000), ('18 L', 18000)]
+            
+        active_vehicles = []
+        total_available_capacity = 0
+        for name, cap in pref_order:
+            limit = int(vehicle_limits.get(name, 1000))
+            if limit > 0:
+                active_vehicles.append((name, cap, limit))
+                total_available_capacity += limit * cap
+                
+        if not active_vehicles:
+            return {}
+            
+        if total_available_capacity <= target_flow:
+            res = {}
+            for name, cap, limit in active_vehicles:
+                res[name] = limit
+            return {k: v for k, v in res.items() if v > 0}
+            
+        try:
+            from ortools.linear_solver import pywraplp
+        except ImportError:
+            return cls.get_optimal_vehicles_fallback(flow, vehicle_limits, distance, strategy, margin)
+
+        # Scale flow and capacities to units of 1000 L to prevent precision issues
+        target_flow_units = int(math.ceil(target_flow / 1000.0))
+        
+        solver = pywraplp.Solver.CreateSolver('SCIP')
+        if solver:
+            # Set gap limit to 0 for absolute optimality
+            solver.SetSolverSpecificParametersAsString("limits/gap = 0")
+        else:
+            solver = pywraplp.Solver.CreateSolver('CBC')
+            if not solver:
+                return cls.get_optimal_vehicles_fallback(flow, vehicle_limits, distance, strategy, margin)
+
+        vars_map = {}
+        for idx, (name, cap, limit) in enumerate(active_vehicles):
+            cap_units = cap // 1000
+            max_needed = int(math.ceil(target_flow_units / cap_units))
+            var_limit = min(limit, max_needed)
+            vars_map[name] = (solver.IntVar(0, var_limit, f"x_{name}"), cap_units, idx)
+
+        # Constraint: sum(x_i * cap_units_i) >= target_flow_units
+        solver.Add(sum(var * cap_units for var, cap_units, _ in vars_map.values()) >= target_flow_units)
+
+        # Objective: Minimize: M1 * sum(x_i * cap_units_i) + M2 * sum(x_i) + M3 * sum(x_i * idx_i)
+        # M1 = 10000 (capacity minimization dominates)
+        # M2 = 100 (vehicle count minimization secondary)
+        # M3 = 1 (preference penalty tertiary, idx matches pref_order)
+        M1 = 10000.0
+        M2 = 100.0
+        M3 = 1.0
+        
+        obj_expr = []
+        for var, cap_units, idx in vars_map.values():
+            obj_expr.append(var * (M1 * cap_units + M2 + M3 * idx))
+            
+        solver.Minimize(solver.Sum(obj_expr))
+        
+        status = solver.Solve()
+        
+        res = {}
+        if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+            for name, (var, _, _) in vars_map.items():
+                val = int(round(var.solution_value()))
+                if val > 0:
+                    res[name] = val
+            return res
+            
+        return cls.get_optimal_vehicles_fallback(flow, vehicle_limits, distance, strategy, margin)
 
     @classmethod
     def solve_network_lp(cls, farmers: List[Dict[str, Any]], hubs: List[Dict[str, Any]], plants: List[Dict[str, Any]], geographies: List[Dict[str, Any]], transport_cost_per_km: float = 0.005, excel_file_path: Optional[str] = None) -> Dict[str, Any]:
@@ -1095,6 +1206,10 @@ class OptimizerService:
             margin_low = r.get('margin_low', 5.0)
             margin_high = r.get('margin_high', 5.0)
             
+            lq_10 = 0.0
+            lq_12 = 0.0
+            lq_15 = 0.0
+            lq_18 = 0.0
             if r.get('from_type') == 'hub':
                 bmc_info = vehicle_limits_map.get(r['from_id'], {})
                 cluster = bmc_info.get('cluster', '')
@@ -1102,6 +1217,11 @@ class OptimizerService:
                 strategy = bmc_info.get('strategy', '')
                 margin_low = bmc_info.get('margin_low', 5.0)
                 margin_high = bmc_info.get('margin_high', 5.0)
+                lq_dict = bmc_info.get('leave_quantities', {})
+                lq_10 = lq_dict.get('10 L', 0.0)
+                lq_12 = lq_dict.get('12L', 0.0)
+                lq_15 = lq_dict.get('15 L', 0.0)
+                lq_18 = lq_dict.get('18 L', 0.0)
                 
             routes_data.append({
                 'Route ID': r['id'],
@@ -1136,7 +1256,11 @@ class OptimizerService:
                 'SupplierSubCluster': subcluster,
                 'Strategy': strategy,
                 'FlowLowMarginPercentage': margin_low,
-                'FlowHighMarginPercentage': margin_high
+                'FlowHighMarginPercentage': margin_high,
+                '10 L LeaveQuantity': lq_10,
+                '12L LeaveQuantity': lq_12,
+                '15 L LeaveQuantity': lq_15,
+                '18 L LeaveQuantity': lq_18
             })
         df_routes = pd.DataFrame(routes_data)
 

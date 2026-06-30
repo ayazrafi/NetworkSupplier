@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+.git/
+.env
+uploads/
+outputs/
+Dockerfile
+Jenkinsfile
+docker-compose.yml
