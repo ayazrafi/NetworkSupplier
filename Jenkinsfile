@@ -10,8 +10,8 @@ pipeline {
         SSH_USER = "root" // Change this to your production server SSH username (e.g., ubuntu, root, admin)
         
         // Jenkins Credentials IDs (Must match the IDs you created in Jenkins Dashboard)
-        DOCKER_CREDS_ID = "docker-hub-credentials"
-        SSH_CREDS_ID = "ubuntu-server-ssh-key"
+        DOCKER_CREDS_ID = "docker-hub-credentials-02"
+        SSH_CREDS_ID = "ubuntu-server-ssh-key-02"
     }
 
     stages {
