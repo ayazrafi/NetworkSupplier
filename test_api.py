@@ -13,8 +13,7 @@ def request_json(url_path, method="GET", data=None, token=None, files=None):
     if token:
         headers["Authorization"] = f"Bearer {token}"
         
-    req_data = None
-    
+    req_data = None    
     if files:
         # Handle multipart/form-data upload using standard library
         boundary = "===Boundary==="
