@@ -2,73 +2,68 @@ pipeline {
     agent any
 
     environment {
-        // FIXME: Replace 'your-dockerhub-username' with your actual Docker Hub username
         DOCKER_IMAGE = "ayazlogon/network-supplier-api:latest"
-        
-        // FIXME: Replace with your actual Ubuntu Production Server IP address
-        PROD_SERVER_IP = "13.234.134.227"
-        SSH_USER = "root" // Change this to your production server SSH username (e.g., ubuntu, root, admin)
-        
-        // Jenkins Credentials IDs (Must match the IDs you created in Jenkins Dashboard)
         DOCKER_CREDS_ID = "docker-hub-credentials-02"
-        SSH_CREDS_ID = "ubuntu-server-ssh-key-02"
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
-                // Pulls latest changes from your Git repository (GitHub/GitLab)
                 checkout scm
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Building Docker image: ${DOCKER_IMAGE}..."
-                sh "docker build -t ${DOCKER_IMAGE} ."
+                echo "Building Docker Image..."
+                sh """
+                    docker build -t ${DOCKER_IMAGE} .
+                """
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Push Docker Image') {
             steps {
-                echo 'Pushing built image to Docker Hub...'
-                withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDS_ID}", usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                    sh "echo ${PASS} | docker login -u ${USER} --password-stdin"
-                    sh "docker push ${DOCKER_IMAGE}"
-                }
-            }
-        }
+                withCredentials([usernamePassword(
+                    credentialsId: "${DOCKER_CREDS_ID}",
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
 
-        stage('Deploy to Production Server') {
-            steps {
-                echo "Deploying to remote Ubuntu Server (${PROD_SERVER_IP})..."
-                sshagent(["${SSH_CREDS_ID}"]) {
-                    // Connects to your production server via SSH, pulls the new image, and restarts the container
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${SSH_USER}@${PROD_SERVER_IP} '
-                            cd ~/network-supplier-api &&
-                            docker-compose pull &&
-                            docker-compose up -d --force-recreate
-                        '
+                        echo \$DOCKER_PASS | docker login -u \$DOCKER_USER --password-stdin
+                        docker push ${DOCKER_IMAGE}
+                        docker logout
                     """
                 }
             }
         }
 
-        stage('Post-Build Cleanup') {
+        stage('Deploy') {
             steps {
-                echo 'Cleaning up unused Docker images on the Jenkins build server...'
-                sh 'docker image prune -f'
+                echo "Deploying application..."
+
+                sh """
+                    cd /home/ayaz/network-supplier-api
+
+                    docker compose pull
+
+                    docker compose up -d --force-recreate
+
+                    docker image prune -f
+                """
             }
         }
     }
 
     post {
         success {
-            echo 'Pipeline completed and deployment was successful!'
+            echo "Deployment Successful"
         }
+
         failure {
-            echo 'Pipeline failed. Check build logs for details.'
+            echo "Deployment Failed"
         }
     }
 }
