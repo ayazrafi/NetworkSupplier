@@ -45,6 +45,8 @@ pipeline {
                 echo "Deploying application..."
 
                 sh """
+                    cp docker-compose.yml /home/ayaz/network-supplier-api/docker-compose.yml
+
                     cd /home/ayaz/network-supplier-api
 
                     docker compose pull
