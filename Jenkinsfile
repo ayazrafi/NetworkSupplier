@@ -46,6 +46,7 @@ pipeline {
 
                 sh """
                     cp docker-compose.yml /home/ayaz/network-supplier-api/docker-compose.yml
+                    cp .env /home/ayaz/network-supplier-api/.env
 
                     cd /home/ayaz/network-supplier-api
 
