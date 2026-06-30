@@ -7,7 +7,7 @@ services:
     restart: always
     ports:
       # Bind to 127.0.0.1:3056 so it is secure and only Nginx can proxy to it
-      - "127.0.0.1:3056:3056"
+      - "3056:3056"
     env_file:
       - .env
     volumes:
