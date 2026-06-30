@@ -6,4 +6,5 @@ venv/
 .git/
 uploads/
 outputs/
+.env
 
