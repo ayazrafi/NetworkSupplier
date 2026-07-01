@@ -1,4 +1,4 @@
-import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.plant import PlantRepository
@@ -20,7 +20,7 @@ class PlantService:
             raise ValueError(f"Plant with code '{plant_data['PlantCode']}' already exists.")
 
         now = datetime.utcnow()
-        plant_data["PlantId"] = str(uuid.uuid4())
+        plant_data["PlantId"] = str(ObjectId())
         plant_data["CreatedBy"] = created_by
         plant_data["CreatedDate"] = now
         plant_data["UpdatedBy"] = created_by

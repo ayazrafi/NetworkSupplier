@@ -1,22 +1,28 @@
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
+from src.models.validators import ObjectIdStr
+
+# Vehicle-Count item structure
+class SupplierVehicleCount(BaseModel):
+    vehicleId: ObjectIdStr = Field(..., description="Vehicle ID")
+    count: int = Field(..., ge=0, description="Vehicle count")
 
 # Supplier-Cluster Mapping
 class SupplierClusterMappingCreate(BaseModel):
-    SupplierId: str = Field(..., min_length=1, description="Supplier ID")
-    ClusterId: str = Field(..., min_length=1, description="Cluster ID")
+    SupplierId: ObjectIdStr = Field(..., description="Supplier ID")
+    ClusterId: ObjectIdStr = Field(..., description="Cluster ID")
     IsActive: bool = Field(True, description="Active status")
 
 class SupplierClusterMappingUpdate(BaseModel):
-    SupplierId: Optional[str] = Field(None, min_length=1, description="Supplier ID")
-    ClusterId: Optional[str] = Field(None, min_length=1, description="Cluster ID")
+    SupplierId: Optional[ObjectIdStr] = Field(None, description="Supplier ID")
+    ClusterId: Optional[ObjectIdStr] = Field(None, description="Cluster ID")
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class SupplierClusterMappingResponse(BaseModel):
-    MappingId: str
-    SupplierId: str
-    ClusterId: str
+    MappingId: ObjectIdStr
+    SupplierId: ObjectIdStr
+    ClusterId: ObjectIdStr
     IsActive: bool
     CreatedBy: Optional[str] = None
     CreatedDate: datetime
@@ -32,19 +38,19 @@ class SupplierClusterMappingResponse(BaseModel):
 
 # Vehicle-Supplier Mapping
 class VehicleSupplierMappingCreate(BaseModel):
-    VehicleId: str = Field(..., min_length=1, description="Vehicle ID")
-    SupplierId: str = Field(..., min_length=1, description="Supplier ID")
+    VehicleId: ObjectIdStr = Field(..., description="Vehicle ID")
+    SupplierId: ObjectIdStr = Field(..., description="Supplier ID")
     IsActive: bool = Field(True, description="Active status")
 
 class VehicleSupplierMappingUpdate(BaseModel):
-    VehicleId: Optional[str] = Field(None, min_length=1, description="Vehicle ID")
-    SupplierId: Optional[str] = Field(None, min_length=1, description="Supplier ID")
+    VehicleId: Optional[ObjectIdStr] = Field(None, description="Vehicle ID")
+    SupplierId: Optional[ObjectIdStr] = Field(None, description="Supplier ID")
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class VehicleSupplierMappingResponse(BaseModel):
-    MappingId: str
-    VehicleId: str
-    SupplierId: str
+    MappingId: ObjectIdStr
+    VehicleId: ObjectIdStr
+    SupplierId: ObjectIdStr
     IsActive: bool
     CreatedBy: Optional[str] = None
     CreatedDate: datetime
@@ -60,19 +66,53 @@ class VehicleSupplierMappingResponse(BaseModel):
 
 # Vehicle-Cluster Mapping
 class VehicleClusterMappingCreate(BaseModel):
-    VehicleId: str = Field(..., min_length=1, description="Vehicle ID")
-    ClusterId: str = Field(..., min_length=1, description="Cluster ID")
+    VehicleId: ObjectIdStr = Field(..., description="Vehicle ID")
+    ClusterId: ObjectIdStr = Field(..., description="Cluster ID")
     IsActive: bool = Field(True, description="Active status")
 
 class VehicleClusterMappingUpdate(BaseModel):
-    VehicleId: Optional[str] = Field(None, min_length=1, description="Vehicle ID")
-    ClusterId: Optional[str] = Field(None, min_length=1, description="Cluster ID")
+    VehicleId: Optional[ObjectIdStr] = Field(None, description="Vehicle ID")
+    ClusterId: Optional[ObjectIdStr] = Field(None, description="Cluster ID")
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class VehicleClusterMappingResponse(BaseModel):
-    MappingId: str
-    VehicleId: str
-    ClusterId: str
+    MappingId: ObjectIdStr
+    VehicleId: ObjectIdStr
+    ClusterId: ObjectIdStr
+    IsActive: bool
+    CreatedBy: Optional[str] = None
+    CreatedDate: datetime
+    UpdatedBy: Optional[str] = None
+    UpdatedDate: datetime
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat()
+        }
+
+
+# BMC-Supplier-Cluster Mapping
+class BMCSupplierClusterMappingCreate(BaseModel):
+    BMCId: ObjectIdStr = Field(..., description="BMC ID")
+    SupplierId: ObjectIdStr = Field(..., description="Supplier ID")
+    ClusterId: ObjectIdStr = Field(..., description="Cluster ID")
+    Vehicles: List[SupplierVehicleCount] = Field(default_factory=list, description="Array of vehicle ID and count")
+    IsActive: bool = Field(True, description="Active status")
+
+class BMCSupplierClusterMappingUpdate(BaseModel):
+    BMCId: Optional[ObjectIdStr] = Field(None, description="BMC ID")
+    SupplierId: Optional[ObjectIdStr] = Field(None, description="Supplier ID")
+    ClusterId: Optional[ObjectIdStr] = Field(None, description="Cluster ID")
+    Vehicles: Optional[List[SupplierVehicleCount]] = Field(None, description="Array of vehicle ID and count")
+    IsActive: Optional[bool] = Field(None, description="Active status")
+
+class BMCSupplierClusterMappingResponse(BaseModel):
+    MappingId: ObjectIdStr
+    BMCId: ObjectIdStr
+    SupplierId: ObjectIdStr
+    ClusterId: ObjectIdStr
+    Vehicles: List[SupplierVehicleCount] = []
     IsActive: bool
     CreatedBy: Optional[str] = None
     CreatedDate: datetime

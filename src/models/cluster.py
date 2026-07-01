@@ -17,7 +17,7 @@ class ClusterUpdate(BaseModel):
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class ClusterResponse(BaseModel):
-    ClusterId: str
+    ClusterId: ObjectIdStr
     ClusterCode: str
     ClusterName: str
     WorkZoneId: Optional[ObjectIdStr] = None

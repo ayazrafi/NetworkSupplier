@@ -1,6 +1,7 @@
 from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+from src.models.validators import ObjectIdStr
 
 class VehicleCreate(BaseModel):
     VehicleType: str = Field(..., min_length=1, description="Vehicle type, e.g., 10 L, 12 L")
@@ -17,7 +18,7 @@ class VehicleUpdate(BaseModel):
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class VehicleResponse(BaseModel):
-    VehicleId: str
+    VehicleId: ObjectIdStr
     VehicleType: str
     VehicleCapacity: float
     CapacityUnit: str

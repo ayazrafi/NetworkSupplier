@@ -2,8 +2,23 @@ from typing import List, Optional, Dict, Any, Tuple
 from bson import ObjectId
 from src.config.db import DatabaseConnection
 
+ID_FIELDS = (
+    "OrganizationId", 
+    "WorkZoneId", 
+    "BMCId", 
+    "SupplierId", 
+    "ClusterId", 
+    "VehicleId", 
+    "vehicleId", 
+    "PlantId", 
+    "VehicleTypeId", 
+    "MappingId", 
+    "JobId",
+    "_id"
+)
+
 def convert_field_val(field: str, val: Any) -> Any:
-    if field in ("OrganizationId", "WorkZoneId", "_id") and isinstance(val, str):
+    if field in ID_FIELDS and isinstance(val, str):
         try:
             return ObjectId(val)
         except Exception:
@@ -14,7 +29,7 @@ def convert_id_fields(data: Any) -> Any:
     if isinstance(data, dict):
         new_dict = {}
         for k, v in data.items():
-            if k in ("OrganizationId", "WorkZoneId", "_id") and isinstance(v, str):
+            if k in ID_FIELDS and isinstance(v, str):
                 try:
                     new_dict[k] = ObjectId(v)
                 except Exception:
@@ -32,7 +47,7 @@ def convert_id_fields_to_str(data: Any) -> Any:
     if isinstance(data, dict):
         new_dict = {}
         for k, v in data.items():
-            if k in ("OrganizationId", "WorkZoneId", "_id") and isinstance(v, ObjectId):
+            if k in ID_FIELDS and isinstance(v, ObjectId):
                 new_dict[k] = str(v)
             elif isinstance(v, (dict, list)):
                 new_dict[k] = convert_id_fields_to_str(v)
@@ -47,7 +62,7 @@ def convert_query_ids(query: Any) -> Any:
     if isinstance(query, dict):
         new_query = {}
         for k, v in query.items():
-            if k in ("OrganizationId", "WorkZoneId", "_id"):
+            if k in ID_FIELDS:
                 if isinstance(v, str):
                     try:
                         new_query[k] = ObjectId(v)

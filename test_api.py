@@ -214,6 +214,7 @@ def run_tests():
         "SupplierName": "Anand Area Supplier",
         "WorkZoneId": wz_id,
         "Description": "Test Supplier 1",
+        "Vehicles": [{"vehicleId": vehicle_id, "count": 5}],
         "IsActive": True
     }
     status, res = request_json("/api/v1/supplier", "POST", data=sup_data, token=token)
@@ -261,6 +262,32 @@ def run_tests():
     status, res = request_json("/api/v1/supplier-cluster-mapping", "POST", data=map_data, token=token)
     assert status == 400, f"Expected duplicate mapping to fail with 400, got: {status}"
     print("Duplicate mapping rejected as expected:", res.get("error", res.get("detail")))
+
+    # 13a. Create BMC-Supplier-Cluster Mapping
+    print("\n13a. Creating BMC-Supplier-Cluster Mapping...")
+    bsc_map_data = {
+        "BMCId": bmc_id,
+        "SupplierId": supplier_id,
+        "ClusterId": cluster_id,
+        "Vehicles": [{"vehicleId": vehicle_id, "count": 3}],
+        "IsActive": True
+    }
+    status, res = request_json("/api/v1/bmc-supplier-cluster-mapping", "POST", data=bsc_map_data, token=token)
+    assert status in (201, 400), f"Create BMC-Supplier-Cluster Mapping failed: {res}"
+    if status == 201:
+        bsc_map_id = res["data"]["mapping"]["MappingId"]
+        print(f"BMC-Supplier-Cluster Mapping created successfully. MappingId: {bsc_map_id}")
+    else:
+        status, get_res = request_json("/api/v1/bmc-supplier-cluster-mapping", "GET", token=token)
+        assert status == 200
+        bsc_map_id = next(m["MappingId"] for m in get_res["data"]["mappings"] if m["BMCId"] == bmc_id and m["SupplierId"] == supplier_id and m["ClusterId"] == cluster_id)
+        print(f"BMC-Supplier-Cluster Mapping already exists. MappingId: {bsc_map_id}")
+
+    # 13b. Verify duplicate mapping constraint for BMC-Supplier-Cluster Mapping
+    print("\n13b. Verifying duplicate BMC-Supplier-Cluster mapping constraint...")
+    status, res = request_json("/api/v1/bmc-supplier-cluster-mapping", "POST", data=bsc_map_data, token=token)
+    assert status == 400, f"Expected duplicate BMC-Supplier-Cluster mapping to fail with 400, got: {status}"
+    print("Duplicate BMC-Supplier-Cluster mapping rejected as expected:", res.get("error", res.get("detail")))
 
     # 14. Test Excel Upload Job
     print("\n14. Testing Excel Upload Job...")

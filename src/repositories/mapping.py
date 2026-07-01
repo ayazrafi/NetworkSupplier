@@ -35,3 +35,16 @@ class VehicleClusterMappingRepository(BaseRepository):
             "ClusterId": cluster_id
         })
         return doc is not None
+
+
+class BMCSupplierClusterMappingRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("BMCSupplierClusterMapping")
+
+    async def check_duplicate(self, bmc_id: str, supplier_id: str, cluster_id: str) -> bool:
+        doc = await self.collection.find_one({
+            "BMCId": bmc_id,
+            "SupplierId": supplier_id, 
+            "ClusterId": cluster_id
+        })
+        return doc is not None

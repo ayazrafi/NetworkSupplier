@@ -23,7 +23,7 @@ class PlantUpdate(BaseModel):
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class PlantResponse(BaseModel):
-    PlantId: str
+    PlantId: ObjectIdStr
     PlantCode: str
     PlantName: str
     WorkZoneId: Optional[ObjectIdStr] = None

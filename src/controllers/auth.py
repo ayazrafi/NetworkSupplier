@@ -90,6 +90,16 @@ async def seed_database():
     else:
         user_message = "Admin user already exists."
         
+    # Clear other collections to remove legacy UUID data and ensure clean integration test run
+    collections_to_clear = [
+        "OrganizationMaster", "WorkZoneMaster", "BMCMaster", "PlantMaster",
+        "VehicleMaster", "VehicleTypeMaster", "SupplierMaster", "ClusterMaster",
+        "SupplierClusterMapping", "VehicleSupplierMapping", "VehicleClusterMapping",
+        "BMCSupplierClusterMapping", "JobMaster"
+    ]
+    for coll in collections_to_clear:
+        await db[coll].delete_many({})
+        
     # 2. Seed default organization
     org = await db["OrganizationMaster"].find_one({"OrganizationId": ObjectId("6582a8b9f0290e21703043ad")})
     if not org:

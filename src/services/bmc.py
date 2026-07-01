@@ -1,4 +1,4 @@
-import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.bmc import BMCRepository
@@ -21,7 +21,7 @@ class BMCService:
             raise ValueError(f"BMC with code '{bmc_data['BMCCode']}' already exists.")
 
         now = datetime.utcnow()
-        bmc_data["BMCId"] = str(uuid.uuid4())
+        bmc_data["BMCId"] = str(ObjectId())
         bmc_data["CreatedBy"] = created_by
         bmc_data["CreatedDate"] = now
         bmc_data["UpdatedBy"] = created_by

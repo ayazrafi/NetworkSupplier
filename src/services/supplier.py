@@ -1,13 +1,15 @@
-import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.supplier import SupplierRepository
 from src.repositories.workzone import WorkZoneRepository
+from src.repositories.vehicle import VehicleRepository
 
 class SupplierService:
     def __init__(self):
         self.repository = SupplierRepository()
         self.wz_repository = WorkZoneRepository()
+        self.vehicle_repository = VehicleRepository()
 
     async def create(self, supplier_data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
         # Validate WorkZone exists
@@ -20,8 +22,15 @@ class SupplierService:
         if existing:
             raise ValueError(f"Supplier with code '{supplier_data['SupplierCode']}' already exists.")
 
+        # Validate allocated vehicles exist
+        vehicles = supplier_data.get("Vehicles", []) or []
+        for v in vehicles:
+            vid = v["vehicleId"]
+            if not await self.vehicle_repository.get_by_id("VehicleId", vid):
+                raise ValueError(f"Vehicle with ID '{vid}' does not exist.")
+
         now = datetime.utcnow()
-        supplier_data["SupplierId"] = str(uuid.uuid4())
+        supplier_data["SupplierId"] = str(ObjectId())
         supplier_data["CreatedBy"] = created_by
         supplier_data["CreatedDate"] = now
         supplier_data["UpdatedBy"] = created_by
@@ -39,6 +48,14 @@ class SupplierService:
             wz = await self.wz_repository.get_by_id("WorkZoneId", supplier_data["WorkZoneId"])
             if not wz:
                 raise ValueError(f"WorkZone with ID '{supplier_data['WorkZoneId']}' does not exist.")
+
+        # Validate allocated vehicles if changing
+        if "Vehicles" in supplier_data:
+            vehicles = supplier_data.get("Vehicles", []) or []
+            for v in vehicles:
+                vid = v["vehicleId"]
+                if not await self.vehicle_repository.get_by_id("VehicleId", vid):
+                    raise ValueError(f"Vehicle with ID '{vid}' does not exist.")
 
         supplier_data["UpdatedBy"] = updated_by
         supplier_data["UpdatedDate"] = datetime.utcnow()

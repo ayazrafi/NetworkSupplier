@@ -1,4 +1,4 @@
-import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.vehicle import VehicleRepository
@@ -13,7 +13,7 @@ class VehicleService:
             raise ValueError(f"Vehicle type '{vehicle_data['VehicleType']}' already exists.")
 
         now = datetime.utcnow()
-        vehicle_data["VehicleId"] = str(uuid.uuid4())
+        vehicle_data["VehicleId"] = str(ObjectId())
         vehicle_data["CreatedBy"] = created_by
         vehicle_data["CreatedDate"] = now
         vehicle_data["UpdatedBy"] = created_by

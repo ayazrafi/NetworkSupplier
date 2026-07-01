@@ -3,12 +3,14 @@ from typing import Dict, Any, Optional
 from src.models.mapping import (
     SupplierClusterMappingCreate, SupplierClusterMappingUpdate, SupplierClusterMappingResponse,
     VehicleSupplierMappingCreate, VehicleSupplierMappingUpdate, VehicleSupplierMappingResponse,
-    VehicleClusterMappingCreate, VehicleClusterMappingUpdate, VehicleClusterMappingResponse
+    VehicleClusterMappingCreate, VehicleClusterMappingUpdate, VehicleClusterMappingResponse,
+    BMCSupplierClusterMappingCreate, BMCSupplierClusterMappingUpdate, BMCSupplierClusterMappingResponse
 )
 from src.services.mapping import (
     SupplierClusterMappingService,
     VehicleSupplierMappingService,
-    VehicleClusterMappingService
+    VehicleClusterMappingService,
+    BMCSupplierClusterMappingService
 )
 from src.middlewares.auth import get_current_user
 
@@ -269,6 +271,98 @@ async def get_vc_mapping_list(
         
     docs, total = await vc_service.get_list(query, skip, limit)
     serialized = [VehicleClusterMappingResponse(**item) for item in docs]
+    return {
+        "success": True,
+        "message": "Mappings retrieved successfully",
+        "data": {
+            "mappings": serialized,
+            "count": total
+        }
+    }
+
+
+# 4. BMC-Supplier-Cluster Router
+bsc_router = APIRouter(prefix="/api/v1/bmc-supplier-cluster-mapping", tags=["BMC-Supplier-Cluster Mapping"])
+bsc_service = BMCSupplierClusterMappingService()
+
+@bsc_router.post("", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+async def create_bsc_mapping(mapping_in: BMCSupplierClusterMappingCreate, current_user: dict = Depends(get_current_user)):
+    try:
+        new_mapping = await bsc_service.create(mapping_in.model_dump(), current_user["userId"])
+        return {
+            "success": True,
+            "message": "Mapping created successfully",
+            "data": {
+                "mapping": BMCSupplierClusterMappingResponse(**new_mapping)
+            }
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@bsc_router.put("/{mapping_id}", response_model=Dict[str, Any])
+async def update_bsc_mapping(mapping_id: str, mapping_in: BMCSupplierClusterMappingUpdate, current_user: dict = Depends(get_current_user)):
+    try:
+        updated_mapping = await bsc_service.update(mapping_id, mapping_in.model_dump(exclude_unset=True), current_user["userId"])
+        return {
+            "success": True,
+            "message": "Mapping updated successfully",
+            "data": {
+                "mapping": BMCSupplierClusterMappingResponse(**updated_mapping)
+            }
+        }
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@bsc_router.delete("/{mapping_id}", response_model=Dict[str, Any])
+async def delete_bsc_mapping(mapping_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        await bsc_service.delete(mapping_id)
+        return {
+            "success": True,
+            "message": "Mapping deleted successfully",
+            "data": None
+        }
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@bsc_router.get("/{mapping_id}", response_model=Dict[str, Any])
+async def get_bsc_mapping_by_id(mapping_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        mapping = await bsc_service.get_by_id(mapping_id)
+        return {
+            "success": True,
+            "message": "Mapping retrieved successfully",
+            "data": {
+                "mapping": BMCSupplierClusterMappingResponse(**mapping)
+            }
+        }
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@bsc_router.get("", response_model=Dict[str, Any])
+async def get_bsc_mapping_list(
+    bmcId: Optional[str] = Query(None),
+    supplierId: Optional[str] = Query(None),
+    clusterId: Optional[str] = Query(None),
+    isActive: Optional[bool] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1),
+    current_user: dict = Depends(get_current_user)
+):
+    query = {}
+    if bmcId is not None:
+        query["BMCId"] = bmcId
+    if supplierId is not None:
+        query["SupplierId"] = supplierId
+    if clusterId is not None:
+        query["ClusterId"] = clusterId
+    if isActive is not None:
+        query["IsActive"] = isActive
+        
+    docs, total = await bsc_service.get_list(query, skip, limit)
+    serialized = [BMCSupplierClusterMappingResponse(**item) for item in docs]
     return {
         "success": True,
         "message": "Mappings retrieved successfully",

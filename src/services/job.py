@@ -1,5 +1,6 @@
 import os
 import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List, Optional
 from src.repositories.job import JobRepository
@@ -16,7 +17,7 @@ class JobService:
 
     async def create(self, job_data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
         now = datetime.utcnow()
-        job_id = str(uuid.uuid4())
+        job_id = str(ObjectId())
         job_data["JobId"] = job_id
         job_data["JobStatus"] = "Pending"
         job_data["TotalRecords"] = 0

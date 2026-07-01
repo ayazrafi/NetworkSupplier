@@ -1,12 +1,13 @@
 from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+from src.models.validators import ObjectIdStr
 
 class JobCreate(BaseModel):
     JobName: str = Field(..., min_length=1, description="Job name")
 
 class JobResponse(BaseModel):
-    JobId: str
+    JobId: ObjectIdStr
     JobName: str
     UploadedFileName: Optional[str] = None
     UploadedFilePath: Optional[str] = None

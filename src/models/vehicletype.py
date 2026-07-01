@@ -17,7 +17,7 @@ class VehicleTypeUpdate(BaseModel):
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class VehicleTypeResponse(BaseModel):
-    VehicleTypeId: str
+    VehicleTypeId: ObjectIdStr
     VehicleTypeCode: str
     VehicleTypeName: str
     WorkZoneId: ObjectIdStr

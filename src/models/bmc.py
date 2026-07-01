@@ -25,7 +25,7 @@ class BMCUpdate(BaseModel):
     IsActive: Optional[bool] = Field(None, description="Active status")
 
 class BMCResponse(BaseModel):
-    BMCId: str
+    BMCId: ObjectIdStr
     BMCCode: str
     BMCName: str
     WorkZoneId: Optional[ObjectIdStr] = None

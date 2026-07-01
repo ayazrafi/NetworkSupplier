@@ -143,6 +143,7 @@ app.include_router(cluster.router)
 app.include_router(mapping.sc_router)
 app.include_router(mapping.vs_router)
 app.include_router(mapping.vc_router)
+app.include_router(mapping.bsc_router)
 app.include_router(job.router)
 
 @app.get("/", include_in_schema=False)

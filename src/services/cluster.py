@@ -1,4 +1,4 @@
-import uuid
+from bson import ObjectId
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.cluster import ClusterRepository
@@ -21,7 +21,7 @@ class ClusterService:
             raise ValueError(f"Cluster with code '{cluster_data['ClusterCode']}' already exists.")
 
         now = datetime.utcnow()
-        cluster_data["ClusterId"] = str(uuid.uuid4())
+        cluster_data["ClusterId"] = str(ObjectId())
         cluster_data["CreatedBy"] = created_by
         cluster_data["CreatedDate"] = now
         cluster_data["UpdatedBy"] = created_by
