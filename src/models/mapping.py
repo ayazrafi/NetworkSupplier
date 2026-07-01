@@ -2,11 +2,7 @@ from typing import Optional, List
 from datetime import datetime
 from pydantic import BaseModel, Field
 from src.models.validators import ObjectIdStr
-
-# Vehicle-Count item structure
-class SupplierVehicleCount(BaseModel):
-    vehicleId: ObjectIdStr = Field(..., description="Vehicle ID")
-    count: int = Field(..., ge=0, description="Vehicle count")
+from src.models.supplier import SupplierVehicleCount  # shared vehicle-count item
 
 # Supplier-Cluster Mapping
 class SupplierClusterMappingCreate(BaseModel):
