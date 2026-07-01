@@ -70,6 +70,7 @@ async def login(credentials: LoginRequest):
 
 @router.post("/seed", response_model=Dict[str, Any])
 async def seed_database():
+    from datetime import datetime
     db = DatabaseConnection.get_db()
     
     # 1. Seed admin user
@@ -80,7 +81,7 @@ async def seed_database():
             "userId": "usr_admin",
             "username": "admin",
             "passwordHash": hashed_password,
-            "organizationId": "org_netsup",
+            "organizationId": "6582a8b9f0290e21703043ad",
             "organizationCode": "NET_SUP",
             "roleCode": "ADMIN"
         })
@@ -88,8 +89,45 @@ async def seed_database():
     else:
         user_message = "Admin user already exists."
         
+    # 2. Seed default organization
+    org = await db["OrganizationMaster"].find_one({"OrganizationId": "6582a8b9f0290e21703043ad"})
+    if not org:
+        await db["OrganizationMaster"].insert_one({
+            "OrganizationId": "6582a8b9f0290e21703043ad",
+            "OrganizationCode": "NET_SUP",
+            "OrganizationName": "Network Supplier Org",
+            "Description": "Default seeded organization",
+            "IsActive": True,
+            "CreatedBy": "usr_admin",
+            "CreatedDate": datetime.utcnow(),
+            "UpdatedBy": "usr_admin",
+            "UpdatedDate": datetime.utcnow()
+        })
+        org_message = "Default organization seeded."
+    else:
+        org_message = "Organization already exists."
+        
+    # 3. Seed default workzone
+    wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": "6582a8b9f0290e21703043ae"})
+    if not wz:
+        await db["WorkZoneMaster"].insert_one({
+            "WorkZoneId": "6582a8b9f0290e21703043ae",
+            "WorkZoneCode": "WZ_DEFAULT",
+            "WorkZoneName": "Default WorkZone",
+            "OrganizationId": "6582a8b9f0290e21703043ad",
+            "Description": "Default seeded workzone",
+            "IsActive": True,
+            "CreatedBy": "usr_admin",
+            "CreatedDate": datetime.utcnow(),
+            "UpdatedBy": "usr_admin",
+            "UpdatedDate": datetime.utcnow()
+        })
+        wz_message = "Default workzone seeded."
+    else:
+        wz_message = "Workzone already exists."
+        
     return {
         "success": True,
-        "message": f"Database seeding completed successfully. {user_message}",
+        "message": f"Database seeding completed successfully. {user_message} {org_message} {wz_message}",
         "data": None
     }

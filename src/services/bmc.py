@@ -2,12 +2,19 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.bmc import BMCRepository
+from src.repositories.workzone import WorkZoneRepository
 
 class BMCService:
     def __init__(self):
         self.repository = BMCRepository()
+        self.wz_repository = WorkZoneRepository()
 
     async def create(self, bmc_data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
+        # Validate WorkZone exists
+        wz = await self.wz_repository.get_by_id("WorkZoneId", bmc_data["WorkZoneId"])
+        if not wz:
+            raise ValueError(f"WorkZone with ID '{bmc_data['WorkZoneId']}' does not exist.")
+
         # Enforce unique BMC code
         existing = await self.repository.get_by_code(bmc_data["BMCCode"])
         if existing:
@@ -26,6 +33,12 @@ class BMCService:
         existing = await self.repository.get_by_id("BMCId", bmc_id)
         if not existing:
             raise KeyError(f"BMC with ID '{bmc_id}' not found.")
+
+        # Validate WorkZone if changing
+        if "WorkZoneId" in bmc_data:
+            wz = await self.wz_repository.get_by_id("WorkZoneId", bmc_data["WorkZoneId"])
+            if not wz:
+                raise ValueError(f"WorkZone with ID '{bmc_data['WorkZoneId']}' does not exist.")
 
         bmc_data["UpdatedBy"] = updated_by
         bmc_data["UpdatedDate"] = datetime.utcnow()

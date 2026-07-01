@@ -2,12 +2,20 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.cluster import ClusterRepository
+from src.repositories.workzone import WorkZoneRepository
 
 class ClusterService:
     def __init__(self):
         self.repository = ClusterRepository()
+        self.wz_repository = WorkZoneRepository()
 
     async def create(self, cluster_data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
+        # Validate WorkZone exists
+        wz = await self.wz_repository.get_by_id("WorkZoneId", cluster_data["WorkZoneId"])
+        if not wz:
+            raise ValueError(f"WorkZone with ID '{cluster_data['WorkZoneId']}' does not exist.")
+
+        # Validate unique code
         existing = await self.repository.get_by_code(cluster_data["ClusterCode"])
         if existing:
             raise ValueError(f"Cluster with code '{cluster_data['ClusterCode']}' already exists.")
@@ -25,6 +33,12 @@ class ClusterService:
         existing = await self.repository.get_by_id("ClusterId", cluster_id)
         if not existing:
             raise KeyError(f"Cluster with ID '{cluster_id}' not found.")
+
+        # Validate WorkZone if changing
+        if "WorkZoneId" in cluster_data:
+            wz = await self.wz_repository.get_by_id("WorkZoneId", cluster_data["WorkZoneId"])
+            if not wz:
+                raise ValueError(f"WorkZone with ID '{cluster_data['WorkZoneId']}' does not exist.")
 
         cluster_data["UpdatedBy"] = updated_by
         cluster_data["UpdatedDate"] = datetime.utcnow()

@@ -1,14 +1,26 @@
 from typing import Optional, Dict, Any
 from src.repositories.base import BaseRepository
 
-class ClusterSubClusterMappingRepository(BaseRepository):
+class SupplierClusterMappingRepository(BaseRepository):
     def __init__(self):
-        super().__init__("ClusterSubClusterMapping")
+        super().__init__("SupplierClusterMapping")
 
-    async def check_duplicate(self, cluster_id: str, subcluster_id: str) -> bool:
+    async def check_duplicate(self, supplier_id: str, cluster_id: str) -> bool:
         doc = await self.collection.find_one({
-            "ClusterId": cluster_id, 
-            "SubClusterId": subcluster_id
+            "SupplierId": supplier_id, 
+            "ClusterId": cluster_id
+        })
+        return doc is not None
+
+
+class VehicleSupplierMappingRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("VehicleSupplierMapping")
+
+    async def check_duplicate(self, vehicle_id: str, supplier_id: str) -> bool:
+        doc = await self.collection.find_one({
+            "VehicleId": vehicle_id, 
+            "SupplierId": supplier_id
         })
         return doc is not None
 
@@ -21,17 +33,5 @@ class VehicleClusterMappingRepository(BaseRepository):
         doc = await self.collection.find_one({
             "VehicleId": vehicle_id, 
             "ClusterId": cluster_id
-        })
-        return doc is not None
-
-
-class VehicleSubClusterMappingRepository(BaseRepository):
-    def __init__(self):
-        super().__init__("VehicleSubClusterMapping")
-
-    async def check_duplicate(self, vehicle_id: str, subcluster_id: str) -> bool:
-        doc = await self.collection.find_one({
-            "VehicleId": vehicle_id, 
-            "SubClusterId": subcluster_id
         })
         return doc is not None

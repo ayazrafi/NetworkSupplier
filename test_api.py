@@ -85,11 +85,50 @@ def run_tests():
     token = res["data"]["token"]
     print("Login successful. Token acquired.")
     
-    # 3. Create BMC Master
-    print("\n3. Creating BMC Master...")
+    # 3. Organization CRUD
+    print("\n3. Creating Organization Master...")
+    org_data = {
+        "OrganizationCode": "ORG_TEST_01",
+        "OrganizationName": "Test Org Ltd",
+        "Description": "Test Org Description",
+        "IsActive": True
+    }
+    status, res = request_json("/api/v1/organization", "POST", data=org_data, token=token)
+    assert status in (201, 400), f"Create Org failed: {res}"
+    if status == 201:
+        org_id = res["data"]["organization"]["OrganizationId"]
+    else:
+        # Retrieve existing
+        status, get_res = request_json("/api/v1/organization", "GET", token=token)
+        assert status == 200
+        org_id = next(o["OrganizationId"] for o in get_res["data"]["organizations"] if o["OrganizationCode"] == "ORG_TEST_01")
+    print(f"Organization ID acquired: {org_id}")
+
+    # 4. WorkZone CRUD
+    print("\n4. Creating WorkZone Master...")
+    wz_data = {
+        "WorkZoneCode": "WZ_TEST_01",
+        "WorkZoneName": "Test Work Zone Anand",
+        "OrganizationId": "6582a8b9f0290e21703043ad",
+        "Description": "Test Work Zone Description",
+        "IsActive": True
+    }
+    status, res = request_json("/api/v1/workzone", "POST", data=wz_data, token=token)
+    assert status in (201, 400), f"Create WorkZone failed: {res}"
+    if status == 201:
+        wz_id = res["data"]["workzone"]["WorkZoneId"]
+    else:
+        status, get_res = request_json("/api/v1/workzone", "GET", token=token)
+        assert status == 200
+        wz_id = next(w["WorkZoneId"] for w in get_res["data"]["workzones"] if w["WorkZoneCode"] == "WZ_TEST_01")
+    print(f"WorkZone ID acquired: {wz_id}")
+
+    # 5. Create BMC Master (requires WorkZoneId)
+    print("\n5. Creating BMC Master...")
     bmc_data = {
         "BMCCode": "BMC_TEST_01",
         "BMCName": "BMC Test Anand",
+        "WorkZoneId": wz_id,
         "Address": "Anand GIDC Industrial Estate",
         "Latitude": 22.5645,
         "Longitude": 72.9289,
@@ -99,20 +138,27 @@ def run_tests():
     }
     status, res = request_json("/api/v1/bmc", "POST", data=bmc_data, token=token)
     assert status in (201, 400), f"Create BMC failed: {res}"
-    print("BMC created or already exists.")
+    if status == 201:
+        bmc_id = res["data"]["bmc"]["BMCId"]
+    else:
+        status, get_res = request_json("/api/v1/bmc", "GET", token=token)
+        assert status == 200
+        bmc_id = next(b["BMCId"] for b in get_res["data"]["bmcs"] if b["BMCCode"] == "BMC_TEST_01")
+    print(f"BMC ID acquired: {bmc_id}")
 
-    # 4. Search BMC
-    print("\n4. Searching BMC...")
+    # 6. Search BMC
+    print("\n6. Searching BMC...")
     status, res = request_json("/api/v1/bmc/search?q=Anand", "GET", token=token)
     assert status == 200, f"Search BMC failed: {res}"
     assert len(res["data"]["results"]) > 0, "No search results returned"
     print(f"Search successful. Found {res['data']['count']} results.")
 
-    # 5. Create Plant Master
-    print("\n5. Creating Plant Master...")
+    # 7. Create Plant Master (requires WorkZoneId)
+    print("\n7. Creating Plant Master...")
     plant_data = {
         "PlantCode": "PLANT_TEST_01",
         "PlantName": "Anand Cheese Factory",
+        "WorkZoneId": wz_id,
         "Address": "Plant Area 1",
         "Latitude": 22.5800,
         "Longitude": 72.9500,
@@ -121,10 +167,16 @@ def run_tests():
     }
     status, res = request_json("/api/v1/plant", "POST", data=plant_data, token=token)
     assert status in (201, 400), f"Create Plant failed: {res}"
-    print("Plant created or already exists.")
+    if status == 201:
+        plant_id = res["data"]["plant"]["PlantId"]
+    else:
+        status, get_res = request_json("/api/v1/plant", "GET", token=token)
+        assert status == 200
+        plant_id = next(p["PlantId"] for p in get_res["data"]["plants"] if p["PlantCode"] == "PLANT_TEST_01")
+    print(f"Plant ID acquired: {plant_id}")
 
-    # 6. Create Vehicle Master
-    print("\n6. Creating Vehicle Master...")
+    # 8. Create Vehicle Master
+    print("\n8. Creating Vehicle Master...")
     veh_data = {
         "VehicleType": "10 L Tanker",
         "VehicleCapacity": 10000.0,
@@ -134,52 +186,84 @@ def run_tests():
     }
     status, res = request_json("/api/v1/vehicle", "POST", data=veh_data, token=token)
     assert status in (201, 400), f"Create Vehicle failed: {res}"
-    print("Vehicle created or already exists.")
+    if status == 201:
+        vehicle_id = res["data"]["vehicle"]["VehicleId"]
+    else:
+        status, get_res = request_json("/api/v1/vehicle", "GET", token=token)
+        assert status == 200
+        vehicle_id = next(v["VehicleId"] for v in get_res["data"]["vehicles"] if v["VehicleType"] == "10 L Tanker")
+    print(f"Vehicle ID acquired: {vehicle_id}")
 
-    # 7. Create Cluster Master
-    print("\n7. Creating Cluster Master...")
+    # 9. Create VehicleType Master (requires WorkZoneId)
+    print("\n9. Creating VehicleType Master...")
+    vt_data = {
+        "VehicleTypeCode": "VT_TEST_01",
+        "VehicleTypeName": "10 KL Tanker Type",
+        "WorkZoneId": wz_id,
+        "Description": "Seeded vehicle type",
+        "IsActive": True
+    }
+    status, res = request_json("/api/v1/vehicletype", "POST", data=vt_data, token=token)
+    assert status in (201, 400), f"Create VehicleType failed: {res}"
+    print("VehicleType created or already exists.")
+
+    # 10. Create Supplier Master (requires WorkZoneId, old Cluster)
+    print("\n10. Creating Supplier Master...")
+    sup_data = {
+        "SupplierCode": "SUP_TEST_01",
+        "SupplierName": "Anand Area Supplier",
+        "WorkZoneId": wz_id,
+        "Description": "Test Supplier 1",
+        "IsActive": True
+    }
+    status, res = request_json("/api/v1/supplier", "POST", data=sup_data, token=token)
+    assert status in (201, 400), f"Create Supplier failed: {res}"
+    if status == 201:
+        supplier_id = res["data"]["supplier"]["SupplierId"]
+    else:
+        status, get_res = request_json("/api/v1/supplier", "GET", token=token)
+        assert status == 200
+        supplier_id = next(s["SupplierId"] for s in get_res["data"]["suppliers"] if s["SupplierCode"] == "SUP_TEST_01")
+    print(f"Supplier ID acquired: {supplier_id}")
+
+    # 11. Create Cluster Master (requires WorkZoneId, old SubCluster)
+    print("\n11. Creating Cluster Master...")
     cluster_data = {
         "ClusterCode": "CL_TEST_01",
-        "ClusterName": "Anand Area Cluster",
-        "Description": "Test cluster 1",
+        "ClusterName": "Anand East Cluster",
+        "WorkZoneId": wz_id,
+        "Description": "Test Cluster 1",
         "IsActive": True
     }
     status, res = request_json("/api/v1/cluster", "POST", data=cluster_data, token=token)
     assert status in (201, 400), f"Create Cluster failed: {res}"
-    print("Cluster created or already exists.")
+    if status == 201:
+        cluster_id = res["data"]["cluster"]["ClusterId"]
+    else:
+        status, get_res = request_json("/api/v1/cluster", "GET", token=token)
+        assert status == 200
+        cluster_id = next(c["ClusterId"] for c in get_res["data"]["clusters"] if c["ClusterCode"] == "CL_TEST_01")
+    print(f"Cluster ID acquired: {cluster_id}")
 
-    # 8. Create SubCluster Master
-    print("\n8. Creating SubCluster Master...")
-    sub_data = {
-        "ClusterCode": "CL_TEST_01",
-        "SubClusterCode": "SUBCL_TEST_01",
-        "SubClusterName": "Anand East SubCluster",
-        "Description": "Test sub-cluster 1",
-        "IsActive": True
-    }
-    status, res = request_json("/api/v1/subcluster", "POST", data=sub_data, token=token)
-    assert status in (201, 400), f"Create SubCluster failed: {res}"
-    print("SubCluster created or already exists.")
-
-    # 9. Create Mapping
-    print("\n9. Creating Cluster-SubCluster Mapping...")
+    # 12. Create Supplier-Cluster Mapping (old Cluster-SubCluster Mapping)
+    print("\n12. Creating Supplier-Cluster Mapping...")
     map_data = {
-        "ClusterCode": "CL_TEST_01",
-        "SubClusterCode": "SUBCL_TEST_01",
+        "SupplierId": supplier_id,
+        "ClusterId": cluster_id,
         "IsActive": True
     }
-    status, res = request_json("/api/v1/cluster-subcluster-mapping", "POST", data=map_data, token=token)
-    assert status in (201, 400), f"Create Mapping failed: {res}"
-    print("Mapping created or already exists.")
+    status, res = request_json("/api/v1/supplier-cluster-mapping", "POST", data=map_data, token=token)
+    assert status in (201, 400), f"Create Supplier-Cluster Mapping failed: {res}"
+    print("Supplier-Cluster Mapping created or already exists.")
 
-    # 10. Duplicate Mapping Check
-    print("\n10. Verifying duplicate mapping constraint...")
-    status, res = request_json("/api/v1/cluster-subcluster-mapping", "POST", data=map_data, token=token)
+    # 13. Duplicate Mapping Check
+    print("\n13. Verifying duplicate mapping constraint...")
+    status, res = request_json("/api/v1/supplier-cluster-mapping", "POST", data=map_data, token=token)
     assert status == 400, f"Expected duplicate mapping to fail with 400, got: {status}"
     print("Duplicate mapping rejected as expected:", res.get("error", res.get("detail")))
 
-    # 11. Test Excel Upload Job
-    print("\n11. Testing Excel Upload Job...")
+    # 14. Test Excel Upload Job
+    print("\n14. Testing Excel Upload Job...")
     src_excel = r"d:\WRMSWork\SupplierNetwork\SupplierNetworkMap\static\Custom-Network-Optimizer.xlsx"
     if os.path.exists(src_excel):
         with open(src_excel, "rb") as f:
@@ -208,7 +292,7 @@ def run_tests():
         print("Job completed processing successfully.")
         
         # Test download
-        print("\n12. Downloading Result Excel file...")
+        print("\n15. Downloading Result Excel file...")
         dl_url = f"{BASE_URL}/api/v1/jobs/{job_id}/download"
         req = urllib.request.Request(dl_url, headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(req) as response:
@@ -224,8 +308,12 @@ if __name__ == "__main__":
     try:
         run_tests()
     except AssertionError as e:
+        import traceback
+        traceback.print_exc()
         print(f"\n[TEST FAILURE] {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"\n[UNEXPECTED ERROR] {e}", file=sys.stderr)
         sys.exit(1)

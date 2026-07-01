@@ -1,10 +1,12 @@
 from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
+from src.models.validators import ObjectIdStr
 
 class BMCCreate(BaseModel):
     BMCCode: str = Field(..., min_length=1, description="Unique BMC code")
     BMCName: str = Field(..., min_length=1, description="BMC name")
+    WorkZoneId: ObjectIdStr = Field(..., description="Associated work zone ID")
     Address: Optional[str] = Field(None, description="Physical address of the BMC")
     Latitude: float = Field(..., description="Latitude coordinate")
     Longitude: float = Field(..., description="Longitude coordinate")
@@ -14,6 +16,7 @@ class BMCCreate(BaseModel):
 
 class BMCUpdate(BaseModel):
     BMCName: Optional[str] = Field(None, min_length=1, description="BMC name")
+    WorkZoneId: Optional[ObjectIdStr] = Field(None, description="Associated work zone ID")
     Address: Optional[str] = Field(None, description="Physical address of the BMC")
     Latitude: Optional[float] = Field(None, description="Latitude coordinate")
     Longitude: Optional[float] = Field(None, description="Longitude coordinate")
@@ -25,6 +28,7 @@ class BMCResponse(BaseModel):
     BMCId: str
     BMCCode: str
     BMCName: str
+    WorkZoneId: Optional[ObjectIdStr] = None
     Address: Optional[str] = None
     Latitude: float
     Longitude: float

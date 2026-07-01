@@ -206,8 +206,15 @@ class OptimizerService:
                     col_strat = next((c for c in df_veh.columns if 'strategy' in str(c).lower()), None)
                     col_margin_low = next((c for c in df_veh.columns if 'flowlowmargin' in str(c).lower().replace(' ', '').replace('_', '')), None)
                     col_margin_high = next((c for c in df_veh.columns if 'flowhighmargin' in str(c).lower().replace(' ', '').replace('_', '')), None)
-                    col_cluster = next((c for c in df_veh.columns if 'cluster' in str(c).lower() and 'sub' not in str(c).lower()), None)
-                    col_subcluster = next((c for c in df_veh.columns if 'subcluster' in str(c).lower().replace(' ', '').replace('_', '')), None)
+                    col_supplier = next((c for c in df_veh.columns if 'supplier' in str(c).lower()), None)
+                    if not col_supplier:
+                        has_subcluster = any('subcluster' in str(c).lower().replace(' ', '').replace('_', '') for c in df_veh.columns)
+                        if has_subcluster:
+                            col_supplier = next((c for c in df_veh.columns if 'cluster' in str(c).lower() and 'sub' not in str(c).lower()), None)
+
+                    col_cluster = next((c for c in df_veh.columns if 'subcluster' in str(c).lower().replace(' ', '').replace('_', '')), None)
+                    if not col_cluster:
+                        col_cluster = next((c for c in df_veh.columns if 'cluster' in str(c).lower() and c != col_supplier), None)
                     
                     for _, row in df_veh.iterrows():
                         bmc_id = str(row[id_col]).strip()
@@ -226,8 +233,8 @@ class OptimizerService:
                             strategy = str(row[col_strat]).strip() if col_strat and pd.notna(row[col_strat]) else "Whole Milk Supply"
                             margin_low = float(row[col_margin_low]) if col_margin_low and pd.notna(row[col_margin_low]) else 5.0
                             margin_high = float(row[col_margin_high]) if col_margin_high and pd.notna(row[col_margin_high]) else 5.0
+                            supplier = str(row[col_supplier]).strip() if col_supplier and pd.notna(row[col_supplier]) else ""
                             cluster = str(row[col_cluster]).strip() if col_cluster and pd.notna(row[col_cluster]) else ""
-                            subcluster = str(row[col_subcluster]).strip() if col_subcluster and pd.notna(row[col_subcluster]) else ""
                             
                             vehicle_limits_map[bmc_id] = {
                                 'limits': limits,
@@ -241,8 +248,8 @@ class OptimizerService:
                                 'margin': margin_low,
                                 'margin_low': margin_low,
                                 'margin_high': margin_high,
-                                'cluster': cluster,
-                                'subcluster': subcluster
+                                'supplier': supplier,
+                                'cluster': cluster
                             }
                 logger.info(f"Loaded vehicle limits, strategies, margins, clusters, and subclusters for {len(vehicle_limits_map)} BMCs from sheet '{sheet_name}'")
         except Exception as e:
@@ -976,9 +983,9 @@ class OptimizerService:
         
         subcluster_vehicle_pools = {}
         for bmc_id, info in vehicle_limits_map.items():
+            s = info.get('supplier', '')
             c = info.get('cluster', '')
-            sc = info.get('subcluster', '')
-            key = (c, sc)
+            key = (s, c)
             if key not in subcluster_vehicle_pools:
                 subcluster_vehicle_pools[key] = {'10 L': 0.0, '12L': 0.0, '15 L': 0.0, '18 L': 0.0}
             limits = info['limits']
@@ -1006,7 +1013,7 @@ class OptimizerService:
         
         def get_subcluster_key(r):
             bmc_info = vehicle_limits_map.get(r['from_id'], {})
-            return (bmc_info.get('cluster', ''), bmc_info.get('subcluster', ''))
+            return (bmc_info.get('supplier', ''), bmc_info.get('cluster', ''))
             
         hub_routes.sort(key=lambda x: (get_subcluster_key(x), -x['flow']))
 
@@ -1200,8 +1207,8 @@ class OptimizerService:
             from_node = next((n for n in nodes if n['id'] == r['from_id']), {'name': 'Unknown'})
             to_node = next((n for n in nodes if n['id'] == r['to_id']), {'name': 'Unknown'})
             
+            supplier = ""
             cluster = ""
-            subcluster = ""
             strategy = ""
             margin_low = r.get('margin_low', 5.0)
             margin_high = r.get('margin_high', 5.0)
@@ -1212,8 +1219,8 @@ class OptimizerService:
             lq_18 = 0.0
             if r.get('from_type') == 'hub':
                 bmc_info = vehicle_limits_map.get(r['from_id'], {})
+                supplier = bmc_info.get('supplier', '')
                 cluster = bmc_info.get('cluster', '')
-                subcluster = bmc_info.get('subcluster', '')
                 strategy = bmc_info.get('strategy', '')
                 margin_low = bmc_info.get('margin_low', 5.0)
                 margin_high = bmc_info.get('margin_high', 5.0)
@@ -1252,8 +1259,8 @@ class OptimizerService:
                 'Total Vehicles': r.get('total_vehicles', 0) if r['from_type'] == 'hub' else 0,
                 'Total Vehicle Capacity (L)': r.get('total_vehicle_capacity', 0) if r['from_type'] == 'hub' else 0,
                 'Excess Vehicle Capacity (L)': r.get('excess_vehicle_capacity', 0) if r['from_type'] == 'hub' else 0,
-                'SupplierCluster': cluster,
-                'SupplierSubCluster': subcluster,
+                'Supplier': supplier,
+                'Cluster': cluster,
                 'Strategy': strategy,
                 'FlowLowMarginPercentage': margin_low,
                 'FlowHighMarginPercentage': margin_high,
@@ -1391,7 +1398,7 @@ class OptimizerService:
         # 4.9. BMC Vehicle Allocation Sheet
         df_veh_alloc = df_hub_to_plant[[
             'From Node ID', 'From Name', 
-            'SupplierCluster', 'SupplierSubCluster', 'Strategy', 
+            'Supplier', 'Cluster', 'Strategy', 
             'FlowLowMarginPercentage', 'FlowHighMarginPercentage',
             'To Node ID', 'To Name', 
             'Product / Milk Type', 'Flow', 'Unit', 
@@ -1421,7 +1428,7 @@ class OptimizerService:
         df_veh_alloc['18 L Capacity'] = df_veh_alloc['18 L'] * 18
         
         columns_order = [
-            'BMC ID', 'BMC Name', 'SupplierCluster', 'SupplierSubCluster', 'Strategy', 
+            'BMC ID', 'BMC Name', 'Supplier', 'Cluster', 'Strategy', 
             'FlowLowMarginPercentage', 'FlowHighMarginPercentage',
             '10 L', '12 L', '15 L', '18 L',
             '10 L Capacity', '12L Capacity', '15 L Capacity', '18 L Capacity',

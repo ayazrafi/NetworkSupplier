@@ -2,12 +2,19 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Tuple, List
 from src.repositories.plant import PlantRepository
+from src.repositories.workzone import WorkZoneRepository
 
 class PlantService:
     def __init__(self):
         self.repository = PlantRepository()
+        self.wz_repository = WorkZoneRepository()
 
     async def create(self, plant_data: Dict[str, Any], created_by: str) -> Dict[str, Any]:
+        # Validate WorkZone exists
+        wz = await self.wz_repository.get_by_id("WorkZoneId", plant_data["WorkZoneId"])
+        if not wz:
+            raise ValueError(f"WorkZone with ID '{plant_data['WorkZoneId']}' does not exist.")
+
         existing = await self.repository.get_by_code(plant_data["PlantCode"])
         if existing:
             raise ValueError(f"Plant with code '{plant_data['PlantCode']}' already exists.")
@@ -25,6 +32,12 @@ class PlantService:
         existing = await self.repository.get_by_id("PlantId", plant_id)
         if not existing:
             raise KeyError(f"Plant with ID '{plant_id}' not found.")
+
+        # Validate WorkZone if changing
+        if "WorkZoneId" in plant_data:
+            wz = await self.wz_repository.get_by_id("WorkZoneId", plant_data["WorkZoneId"])
+            if not wz:
+                raise ValueError(f"WorkZone with ID '{plant_data['WorkZoneId']}' does not exist.")
 
         plant_data["UpdatedBy"] = updated_by
         plant_data["UpdatedDate"] = datetime.utcnow()

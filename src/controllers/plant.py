@@ -65,6 +65,7 @@ async def get_plant_by_id(plant_id: str, current_user: dict = Depends(get_curren
 
 @router.get("", response_model=Dict[str, Any])
 async def get_plant_list(
+    workZoneId: Optional[str] = Query(None, description="Filter by work zone ID"),
     isActive: Optional[bool] = Query(None, description="Filter by active status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1),
@@ -73,6 +74,8 @@ async def get_plant_list(
     current_user: dict = Depends(get_current_user)
 ):
     query = {}
+    if workZoneId is not None:
+        query["WorkZoneId"] = workZoneId
     if isActive is not None:
         query["IsActive"] = isActive
         

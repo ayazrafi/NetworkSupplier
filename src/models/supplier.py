@@ -3,23 +3,23 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from src.models.validators import ObjectIdStr
 
-class ClusterCreate(BaseModel):
-    ClusterCode: str = Field(..., min_length=1, description="Unique cluster code")
-    ClusterName: str = Field(..., min_length=1, description="Cluster name")
+class SupplierCreate(BaseModel):
+    SupplierCode: str = Field(..., min_length=1, description="Unique supplier code")
+    SupplierName: str = Field(..., min_length=1, description="Supplier name")
     WorkZoneId: ObjectIdStr = Field(..., description="Associated work zone ID")
-    Description: Optional[str] = Field(None, description="Cluster description")
+    Description: Optional[str] = Field(None, description="Supplier description")
     IsActive: bool = Field(True, description="Active status")
 
-class ClusterUpdate(BaseModel):
-    ClusterName: Optional[str] = Field(None, min_length=1, description="Cluster name")
+class SupplierUpdate(BaseModel):
+    SupplierName: Optional[str] = Field(None, min_length=1, description="Supplier name")
     WorkZoneId: Optional[ObjectIdStr] = Field(None, description="Associated work zone ID")
-    Description: Optional[str] = Field(None, description="Cluster description")
+    Description: Optional[str] = Field(None, description="Supplier description")
     IsActive: Optional[bool] = Field(None, description="Active status")
 
-class ClusterResponse(BaseModel):
-    ClusterId: str
-    ClusterCode: str
-    ClusterName: str
+class SupplierResponse(BaseModel):
+    SupplierId: str
+    SupplierCode: str
+    SupplierName: str
     WorkZoneId: Optional[ObjectIdStr] = None
     Description: Optional[str] = None
     IsActive: bool

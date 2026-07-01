@@ -14,7 +14,7 @@ from src.config.logging import setup_logging
 from src.workers.job_processor import job_processor_loop
 
 # Import routers
-from src.controllers import auth, bmc, plant, vehicle, cluster, subcluster, mapping, job
+from src.controllers import auth, bmc, plant, vehicle, organization, workzone, vehicletype, supplier, cluster, mapping, job
 
 # Import error handlers
 from src.middlewares.errors import (
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 async def seed_admin_on_startup():
     try:
+        from datetime import datetime
         db = DatabaseConnection.get_db()
         admin_user = await db["Users"].find_one({"username": "admin"})
         if not admin_user:
@@ -36,13 +37,46 @@ async def seed_admin_on_startup():
                 "userId": "usr_admin",
                 "username": "admin",
                 "passwordHash": hashed_password,
-                "organizationId": "org_netsup",
+                "organizationId": "6582a8b9f0290e21703043ad",
                 "organizationCode": "NET_SUP",
                 "roleCode": "ADMIN"
             })
             logger.info("Admin user seeded on startup successfully.")
+
+        # Seed default organization
+        org = await db["OrganizationMaster"].find_one({"OrganizationId": "6582a8b9f0290e21703043ad"})
+        if not org:
+            await db["OrganizationMaster"].insert_one({
+                "OrganizationId": "6582a8b9f0290e21703043ad",
+                "OrganizationCode": "NET_SUP",
+                "OrganizationName": "Network Supplier Org",
+                "Description": "Default seeded organization",
+                "IsActive": True,
+                "CreatedBy": "usr_admin",
+                "CreatedDate": datetime.utcnow(),
+                "UpdatedBy": "usr_admin",
+                "UpdatedDate": datetime.utcnow()
+            })
+            logger.info("Default organization seeded on startup successfully.")
+            
+        # Seed default workzone
+        wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": "6582a8b9f0290e21703043ae"})
+        if not wz:
+            await db["WorkZoneMaster"].insert_one({
+                "WorkZoneId": "6582a8b9f0290e21703043ae",
+                "WorkZoneCode": "WZ_DEFAULT",
+                "WorkZoneName": "Default WorkZone",
+                "OrganizationId": "6582a8b9f0290e21703043ad",
+                "Description": "Default seeded workzone",
+                "IsActive": True,
+                "CreatedBy": "usr_admin",
+                "CreatedDate": datetime.utcnow(),
+                "UpdatedBy": "usr_admin",
+                "UpdatedDate": datetime.utcnow()
+            })
+            logger.info("Default workzone seeded on startup successfully.")
     except Exception as e:
-        logger.error(f"Error seeding admin user on startup: {e}")
+        logger.error(f"Error seeding admin and default organization/workzone on startup: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -95,14 +129,17 @@ app.add_middleware(
 
 # Register Controllers / Routers
 app.include_router(auth.router)
+app.include_router(organization.router)
+app.include_router(workzone.router)
 app.include_router(bmc.router)
 app.include_router(plant.router)
 app.include_router(vehicle.router)
+app.include_router(vehicletype.router)
+app.include_router(supplier.router)
 app.include_router(cluster.router)
-app.include_router(subcluster.router)
-app.include_router(mapping.csc_router)
+app.include_router(mapping.sc_router)
+app.include_router(mapping.vs_router)
 app.include_router(mapping.vc_router)
-app.include_router(mapping.vsc_router)
 app.include_router(job.router)
 
 @app.get("/", include_in_schema=False)

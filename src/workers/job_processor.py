@@ -29,6 +29,13 @@ async def job_processor_loop():
                 output_filename = f"results_{job_id}.xlsx"
                 output_path = os.path.join(OUTPUT_DIR, output_filename)
                 
+                # Debug logging
+                import os as debug_os
+                logger.error(f"DEBUG: Current working directory: {debug_os.getcwd()}")
+                logger.error(f"DEBUG: Target input path: {input_path}")
+                logger.error(f"DEBUG: Absolute input path: {debug_os.path.abspath(input_path)}")
+                logger.error(f"DEBUG: File exists check: {debug_os.path.exists(input_path)}")
+                
                 try:
                     result = await OptimizerService.process_job(job_id, input_path, output_path)
                     
