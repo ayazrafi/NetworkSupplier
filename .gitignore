@@ -10,3 +10,4 @@
 /src/workers/__pycache__
 /uploads/
 /outputs/
+.env

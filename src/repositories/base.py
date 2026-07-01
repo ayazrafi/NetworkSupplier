@@ -14,6 +14,7 @@ ID_FIELDS = (
     "VehicleTypeId", 
     "MappingId", 
     "JobId",
+    "ProductId",
     "_id"
 )
 
