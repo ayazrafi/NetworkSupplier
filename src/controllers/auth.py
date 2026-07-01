@@ -71,6 +71,7 @@ async def login(credentials: LoginRequest):
 @router.post("/seed", response_model=Dict[str, Any])
 async def seed_database():
     from datetime import datetime
+    from bson import ObjectId
     db = DatabaseConnection.get_db()
     
     # 1. Seed admin user
@@ -90,10 +91,11 @@ async def seed_database():
         user_message = "Admin user already exists."
         
     # 2. Seed default organization
-    org = await db["OrganizationMaster"].find_one({"OrganizationId": "6582a8b9f0290e21703043ad"})
+    org = await db["OrganizationMaster"].find_one({"OrganizationId": ObjectId("6582a8b9f0290e21703043ad")})
     if not org:
+        await db["OrganizationMaster"].delete_many({"OrganizationId": {"$in": ["6582a8b9f0290e21703043ad", ObjectId("6582a8b9f0290e21703043ad")]}})
         await db["OrganizationMaster"].insert_one({
-            "OrganizationId": "6582a8b9f0290e21703043ad",
+            "OrganizationId": ObjectId("6582a8b9f0290e21703043ad"),
             "OrganizationCode": "NET_SUP",
             "OrganizationName": "Network Supplier Org",
             "Description": "Default seeded organization",
@@ -108,13 +110,14 @@ async def seed_database():
         org_message = "Organization already exists."
         
     # 3. Seed default workzone
-    wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": "6582a8b9f0290e21703043ae"})
+    wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": ObjectId("6582a8b9f0290e21703043ae")})
     if not wz:
+        await db["WorkZoneMaster"].delete_many({"WorkZoneId": {"$in": ["6582a8b9f0290e21703043ae", ObjectId("6582a8b9f0290e21703043ae")]}})
         await db["WorkZoneMaster"].insert_one({
-            "WorkZoneId": "6582a8b9f0290e21703043ae",
+            "WorkZoneId": ObjectId("6582a8b9f0290e21703043ae"),
             "WorkZoneCode": "WZ_DEFAULT",
             "WorkZoneName": "Default WorkZone",
-            "OrganizationId": "6582a8b9f0290e21703043ad",
+            "OrganizationId": ObjectId("6582a8b9f0290e21703043ad"),
             "Description": "Default seeded workzone",
             "IsActive": True,
             "CreatedBy": "usr_admin",

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 async def seed_admin_on_startup():
     try:
         from datetime import datetime
+        from bson import ObjectId
         db = DatabaseConnection.get_db()
         admin_user = await db["Users"].find_one({"username": "admin"})
         if not admin_user:
@@ -44,10 +45,11 @@ async def seed_admin_on_startup():
             logger.info("Admin user seeded on startup successfully.")
 
         # Seed default organization
-        org = await db["OrganizationMaster"].find_one({"OrganizationId": "6582a8b9f0290e21703043ad"})
+        org = await db["OrganizationMaster"].find_one({"OrganizationId": ObjectId("6582a8b9f0290e21703043ad")})
         if not org:
+            await db["OrganizationMaster"].delete_many({"OrganizationId": {"$in": ["6582a8b9f0290e21703043ad", ObjectId("6582a8b9f0290e21703043ad")]}})
             await db["OrganizationMaster"].insert_one({
-                "OrganizationId": "6582a8b9f0290e21703043ad",
+                "OrganizationId": ObjectId("6582a8b9f0290e21703043ad"),
                 "OrganizationCode": "NET_SUP",
                 "OrganizationName": "Network Supplier Org",
                 "Description": "Default seeded organization",
@@ -60,13 +62,14 @@ async def seed_admin_on_startup():
             logger.info("Default organization seeded on startup successfully.")
             
         # Seed default workzone
-        wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": "6582a8b9f0290e21703043ae"})
+        wz = await db["WorkZoneMaster"].find_one({"WorkZoneId": ObjectId("6582a8b9f0290e21703043ae")})
         if not wz:
+            await db["WorkZoneMaster"].delete_many({"WorkZoneId": {"$in": ["6582a8b9f0290e21703043ae", ObjectId("6582a8b9f0290e21703043ae")]}})
             await db["WorkZoneMaster"].insert_one({
-                "WorkZoneId": "6582a8b9f0290e21703043ae",
+                "WorkZoneId": ObjectId("6582a8b9f0290e21703043ae"),
                 "WorkZoneCode": "WZ_DEFAULT",
                 "WorkZoneName": "Default WorkZone",
-                "OrganizationId": "6582a8b9f0290e21703043ad",
+                "OrganizationId": ObjectId("6582a8b9f0290e21703043ad"),
                 "Description": "Default seeded workzone",
                 "IsActive": True,
                 "CreatedBy": "usr_admin",
