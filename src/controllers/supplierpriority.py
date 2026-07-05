@@ -7,6 +7,7 @@ from src.middlewares.auth import get_current_user
 router = APIRouter(prefix="/api/v1/supplier-priority", tags=["Supplier Priority"])
 service = SupplierPriorityService()
 
+
 @router.post("/sync", response_model=Dict[str, Any])
 async def sync_supplier_priority(current_user: dict = Depends(get_current_user)):
     try:
