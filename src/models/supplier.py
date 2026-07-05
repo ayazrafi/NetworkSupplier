@@ -11,6 +11,7 @@ class SupplierCreate(BaseModel):
     SupplierCode: str = Field(..., min_length=1, description="Unique supplier code")
     SupplierName: str = Field(..., min_length=1, description="Supplier name")
     WorkZoneId: ObjectIdStr = Field(..., description="Associated work zone ID")
+    shortName: Optional[str] = Field(None, description="Supplier short name")
     Description: Optional[str] = Field(None, description="Supplier description")
     Vehicles: Optional[List[SupplierVehicleCount]] = Field(default_factory=list, description="Allocated vehicles with counts")
     IsActive: bool = Field(True, description="Active status")
@@ -18,6 +19,7 @@ class SupplierCreate(BaseModel):
 class SupplierUpdate(BaseModel):
     SupplierName: Optional[str] = Field(None, min_length=1, description="Supplier name")
     WorkZoneId: Optional[ObjectIdStr] = Field(None, description="Associated work zone ID")
+    shortName: Optional[str] = Field(None, description="Supplier short name")
     Description: Optional[str] = Field(None, description="Supplier description")
     Vehicles: Optional[List[SupplierVehicleCount]] = Field(None, description="Allocated vehicles with counts")
     IsActive: Optional[bool] = Field(None, description="Active status")
@@ -27,6 +29,7 @@ class SupplierResponse(BaseModel):
     SupplierCode: str
     SupplierName: str
     WorkZoneId: Optional[ObjectIdStr] = None
+    shortName: Optional[str] = None
     Description: Optional[str] = None
     Vehicles: List[SupplierVehicleCount] = []
     IsActive: bool

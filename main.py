@@ -14,7 +14,7 @@ from src.config.logging import setup_logging
 from src.workers.job_processor import job_processor_loop
 
 # Import routers
-from src.controllers import auth, bmc, plant, vehicle, organization, workzone, vehicletype, supplier, cluster, mapping, job, product, request
+from src.controllers import auth, bmc, plant, vehicle, organization, workzone, vehicletype, supplier, cluster, mapping, job, product, request, supplierpriority
 
 # Import error handlers
 from src.middlewares.errors import (
@@ -147,6 +147,7 @@ app.include_router(mapping.bsc_router)
 app.include_router(job.router)
 app.include_router(product.router)
 app.include_router(request.router)
+app.include_router(supplierpriority.router)
 
 @app.get("/", include_in_schema=False)
 async def redirect_to_docs():
