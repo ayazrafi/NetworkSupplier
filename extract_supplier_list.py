@@ -45,11 +45,17 @@ def generate_supplier_list():
         
         records = []
         now = datetime.utcnow()
+        seen_supplier_codes = set()
         
         for index, row in supplier_df.iterrows():
+            supplier_code = str(row.get('code', '')).strip()
+            if not supplier_code or supplier_code in seen_supplier_codes:
+                continue
+            seen_supplier_codes.add(supplier_code)
+            
             # Map fields according to src/models/supplier.py
             record = {
-                "SupplierCode": str(row.get('code', '')),
+                "SupplierCode": supplier_code,
                 "SupplierName": str(row.get('name', '')),
                 "WorkZoneId": ObjectId("6a4a3f1af35f5b895f72b130"),
                 "shortName": str(row.get('short_name', '')),

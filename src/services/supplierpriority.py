@@ -53,12 +53,12 @@ class SupplierPriorityService:
         headers = {
             "Authorization": "Bearer 40Y8h3xcr3nGBOQ154d154PH23mSj770"
         }
-        data = {
-            "AccessToken": "40Y8h3xcr3nGBOQ154d154PH23mSj770"
+        files = {
+            "AccessToken": (None, "40Y8h3xcr3nGBOQ154d154PH23mSj770")
         }
         
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            response = await client.post(url, headers=headers, data=data)
+            response = await client.post(url, headers=headers, files=files)
             
         if response.status_code != 200:
             raise RuntimeError(f"Failed to fetch data from API. Status: {response.status_code}")
@@ -77,6 +77,7 @@ class SupplierPriorityService:
                 "PlantCode": str(item.get("plant_code", "")),
                 "SupplierCode": str(item.get("supplier_code", "")),
                 "ProductCode": str(item.get("product_code", "")),
+                "WorkZoneId": ObjectId("6a4a3f1af35f5b895f72b130"),
                 "IsActive": True,
                 "CreatedBy": created_by,
                 "CreatedDate": now,

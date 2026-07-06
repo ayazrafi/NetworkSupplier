@@ -45,8 +45,14 @@ def generate_bmc_list():
         
         records = []
         now = datetime.utcnow()
+        seen_bmc_codes = set()
         
         for index, row in bmc_df.iterrows():
+            bmc_code = str(row.get('code', '')).strip()
+            if not bmc_code or bmc_code in seen_bmc_codes:
+                continue
+            seen_bmc_codes.add(bmc_code)
+            
             # Parse latitude and longitude from geocoord
             geocoord = str(row.get('geocoord', ''))
             lat, lon = 0.0, 0.0
@@ -60,7 +66,7 @@ def generate_bmc_list():
             
             # Map fields according to src/models/bmc.py and add requested fields
             record = {
-                "BMCCode": str(row.get('code', '')),
+                "BMCCode": bmc_code,
                 "BMCName": str(row.get('name', '')),
                 "WorkZoneId": ObjectId("6a4a3f1af35f5b895f72b130"),
                 "Address": None,

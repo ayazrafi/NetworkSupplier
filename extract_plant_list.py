@@ -45,8 +45,14 @@ def generate_plant_list():
         
         records = []
         now = datetime.utcnow()
+        seen_plant_codes = set()
         
         for index, row in plant_df.iterrows():
+            plant_code = str(row.get('code', '')).strip()
+            if not plant_code or plant_code in seen_plant_codes:
+                continue
+            seen_plant_codes.add(plant_code)
+            
             # Parse latitude and longitude from geocoord
             geocoord = str(row.get('geocoord', ''))
             lat, lon = 0.0, 0.0
@@ -60,7 +66,7 @@ def generate_plant_list():
             
             # Map fields according to src/models/plant.py
             record = {
-                "PlantCode": str(row.get('code', '')),
+                "PlantCode": plant_code,
                 "PlantName": str(row.get('name', '')),
                 "WorkZoneId": ObjectId("6a4a3f1af35f5b895f72b130"),
                 "Address": None,
