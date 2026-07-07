@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from typing import Dict, Any
+from datetime import datetime
 from src.models.request import RequestCreateInput, OptimizationRequestResponse
 from src.services.request import RequestService
 
@@ -17,6 +18,18 @@ async def create_request(request_in: RequestCreateInput):
             "data": {
                 "request": OptimizationRequestResponse(**new_request)
             }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+async def get_requests_by_date(start_date: datetime, end_date: datetime):
+    try:
+        requests = await request_service.get_requests_by_date_range(start_date, end_date)
+        return {
+            "success": True,
+            "message": "Requests fetched successfully",
+            "data": requests
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

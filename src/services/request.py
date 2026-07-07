@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 from bson import ObjectId
 from pymongo import ReturnDocument
 from src.config.db import DatabaseConnection
@@ -102,3 +102,12 @@ class RequestService:
         await self.settings_repository.create(settings_doc)
 
         return created_opt_req
+
+    async def get_requests_by_date_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        query = {
+            "createdOn": {
+                "$gte": start_date,
+                "$lte": end_date
+            }
+        }
+        return await self.opt_repository.get_all(query, sort_by="createdOn", sort_order=-1)

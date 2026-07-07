@@ -121,7 +121,7 @@ async def poll_requests():
             plants = [n for n in parsed_nodes if n['type'] == 'plant']
             geographies = [n for n in parsed_nodes if n['type'] == 'geography']
             
-            res = optimizer_solver.solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0.005, excel_file_path=excel_path)
+            res = optimizer_solver.solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0.02, excel_file_path=excel_path)
             
             if res.get('status') in ('OPTIMAL', 'FEASIBLE'):
                 routes = res.get('routes', [])

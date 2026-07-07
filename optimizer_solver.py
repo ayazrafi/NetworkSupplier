@@ -34,7 +34,7 @@ except Exception as e:
 in_memory_jobs = []
 public_osrm_failed = False
 
-MAX_DISTANCE_LIMIT = 2000.0
+MAX_DISTANCE_LIMIT = 650.0
 
 DEFAULT_NODES = [
     { 
@@ -1161,7 +1161,7 @@ def parse_bmc_vehicles(excel_file_path):
     return vehicle_limits_map
 
 
-def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0.005, excel_file_path=None):
+def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0.02, excel_file_path=None):
     plant_bmc_mapping = parse_plant_bmc_mapping(excel_file_path)
     try:
         from ortools.linear_solver import pywraplp
@@ -2790,7 +2790,7 @@ def optimize_network():
     hubs = data.get('hubs', [])
     plants = data.get('plants', [])
     geographies = data.get('geographies', [])
-    transport_cost_per_km = data.get('transport_cost_per_km', 0.005)
+    transport_cost_per_km = data.get('transport_cost_per_km', 0.02)
 
     res = solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km)
     if res.get('status') == 'ERROR':
@@ -2882,7 +2882,7 @@ def upload_job():
             
             thread = threading.Thread(
                 target=process_job_in_background, 
-                args=(job_id, network_id, nodes, 0.005, file_path)
+                args=(job_id, network_id, nodes, 0.02, file_path)
             )
             thread.daemon = True
             thread.start()

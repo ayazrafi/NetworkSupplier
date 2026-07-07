@@ -428,7 +428,7 @@ class OptimizerService:
         return cls.get_optimal_vehicles_fallback(flow, vehicle_limits, distance, strategy, margin)
 
     @classmethod
-    def solve_network_lp(cls, farmers: List[Dict[str, Any]], hubs: List[Dict[str, Any]], plants: List[Dict[str, Any]], geographies: List[Dict[str, Any]], transport_cost_per_km: float = 0.005, excel_file_path: Optional[str] = None) -> Dict[str, Any]:
+    def solve_network_lp(cls, farmers: List[Dict[str, Any]], hubs: List[Dict[str, Any]], plants: List[Dict[str, Any]], geographies: List[Dict[str, Any]], transport_cost_per_km: float = 0.02, excel_file_path: Optional[str] = None) -> Dict[str, Any]:
         try:
             from ortools.linear_solver import pywraplp
         except ImportError:
@@ -973,7 +973,7 @@ class OptimizerService:
         geographies = [n for n in nodes if n['type'] == 'geography']
 
         # 2. Run solver
-        res = cls.solve_network_lp(farmers, hubs, plants, geographies, 0.005, input_filepath)
+        res = cls.solve_network_lp(farmers, hubs, plants, geographies, 0.02, input_filepath)
         
         if res.get('status') not in ('OPTIMAL', 'FEASIBLE'):
             raise ValueError(f"Linear solver failed with status: {res.get('status')}. Message: {res.get('message', '')}")
