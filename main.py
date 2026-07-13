@@ -1,4 +1,5 @@
 import asyncio
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -9,9 +10,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from passlib.hash import bcrypt
 
 from src.config.environment import Environment
+from process_requests import poll_requests
 from src.config.db import DatabaseConnection
 from src.config.logging import setup_logging
-from src.workers.job_processor import job_processor_loop
+
 
 # Import routers
 from src.controllers import auth, bmc, plant, vehicle, organization, workzone, vehicletype, supplier, cluster, mapping, job, product, request, supplierpriority, bmcsuppliermapping
@@ -90,18 +92,24 @@ async def lifespan(app: FastAPI):
     await seed_admin_on_startup()
     
     # 3. Start Background Job processor worker
-    app.state.job_processor_task = asyncio.create_task(job_processor_loop())
+    if os.environ.get("job", "false").lower() == "true":
+        logger.info("Starting background request processor...")
+        app.state.process_requests_task = asyncio.create_task(poll_requests())
+    else:
+        logger.info("Background request processor is disabled (job != true).")
+
     logger.info("Lifespan setup completed successfully.")
     
     yield
     
     # 4. Cleanup background worker
     logger.info("Lifespan shutting down: Cancelling background processor...")
-    app.state.job_processor_task.cancel()
-    try:
-        await app.state.job_processor_task
-    except asyncio.CancelledError:
-        pass
+    if hasattr(app.state, 'process_requests_task'):
+        app.state.process_requests_task.cancel()
+        try:
+            await app.state.process_requests_task
+        except asyncio.CancelledError:
+            pass
         
     # 5. Close DB
     await DatabaseConnection.close()
