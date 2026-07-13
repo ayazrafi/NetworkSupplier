@@ -6,194 +6,15 @@ import datetime
 import threading
 import random
 import pandas as pd
-from flask import Flask, request, jsonify, send_from_directory, send_file
-from flask_cors import CORS
-from pymongo import MongoClient
-from werkzeug.utils import secure_filename
-
-app = Flask(__name__, static_folder='static', static_url_path='')
-CORS(app)
-
-# MongoDB connection string configured for localhost:27018
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://mfimongomaster:mongomongo%26*(@localhost:27018/")
-DB_NAME = os.environ.get("MONGO_DB", "supplier_network")
-
-client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
-db = client[DB_NAME]
-nodes_collection = db["nodes"]
-jobs_collection = db["jobs"]
-
-db_available = True
-try:
-    client.server_info()  # Ping the database
-    print(f"Connected to MongoDB at {MONGO_URI}")
-except Exception as e:
-    print(f"WARNING: Could not connect to MongoDB. Falling back to in-memory storage. Error: {e}")
-    db_available = False
-
 in_memory_jobs = []
 
 MAX_DISTANCE_LIMIT = 800.0
-
-in_memory_nodes = []
-
-
-import urllib.request
-import json
-
 _distance_cache = {}
-
-
-
-
-# Directory setup for Excel jobs
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'outputs')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+OUTPUT_FOLDER = 'outputs'
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 
-
-
-# Excel random network generator containing 1000 nodes and UUID network_id
-def generate_random_network():
-    network_id = str(uuid.uuid4())
-    rows = []
-    
-    # 200 Hubs
-    for i in range(1, 201):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        subtype = random.choice(['BMC', 'MCC', 'VLCC'])
-        # Cow Milk
-        rows.append({
-            'node_id': f"H{i}",
-            'name': f"Hub {i}",
-            'type': 'hub',
-            'subtype': subtype,
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Milk',
-            'capacity': random.randint(8000, 20000),
-            'cost': round(random.uniform(0.10, 0.25), 2),
-            'network_id': network_id
-        })
-        # Buffalo Milk
-        rows.append({
-            'node_id': f"H{i}",
-            'name': f"Hub {i}",
-            'type': 'hub',
-            'subtype': subtype,
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Milk',
-            'capacity': random.randint(5000, 15000),
-            'cost': round(random.uniform(0.15, 0.30), 2),
-            'network_id': network_id
-        })
-        
-    # 100 Plants
-    for i in range(1, 101):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        
-        # Raw cow milk capacity
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Milk',
-            'capacity': random.randint(15000, 40000),
-            'cost': round(random.uniform(0.30, 0.50), 2),
-            'network_id': network_id
-        })
-        # Raw buffalo milk capacity
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Milk',
-            'capacity': random.randint(10000, 30000),
-            'cost': round(random.uniform(0.40, 0.60), 2),
-            'network_id': network_id
-        })
-        # Cow Cheese yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Cheese',
-            'yield': 0.10,
-            'network_id': network_id
-        })
-        # Cow Liquid Milk yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Liquid Milk',
-            'yield': 1.0,
-            'network_id': network_id
-        })
-        # Buffalo Cheese yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Cheese',
-            'yield': 0.10,
-            'network_id': network_id
-        })
-        # Cow Khoya yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Khoya',
-            'yield': 0.20,
-            'network_id': network_id
-        })
-        # Buffalo Butter yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Butter',
-            'yield': 0.06,
-            'network_id': network_id
-        })
-        
-
-    df = pd.DataFrame(rows)
-    all_cols = [
-        'node_id', 'name', 'type', 'subtype', 'lat', 'lng', 
-        'commodity', 'supply', 'capacity', 'cost', 'yield', 'demand', 'price', 
-        'network_id'
-    ]
-    df = df.reindex(columns=all_cols)
-    return df
 
 
 def parse_excel_nodes(file_path_or_df):
@@ -315,85 +136,6 @@ def parse_excel_nodes(file_path_or_df):
 
 
 # Jobs DB Helpers supporting MongoDB / in-memory fallback
-def get_all_jobs():
-    if db_available:
-        try:
-            return list(db['jobs'].find({}).sort('created_at', -1))
-        except Exception as e:
-            print("Error listing jobs from MongoDB:", e)
-    return sorted(in_memory_jobs, key=lambda x: x.get('created_at', ''), reverse=True)
-
-def save_new_job(job):
-    if db_available:
-        try:
-            db['jobs'].insert_one(job)
-            return
-        except Exception as e:
-            print("Error inserting job to MongoDB:", e)
-    in_memory_jobs.append(job)
-
-def update_job_status(job_id, status):
-    if db_available:
-        try:
-            db['jobs'].update_one({'job_id': job_id}, {'$set': {'status': status}})
-            return
-        except Exception as e:
-            print("Error updating status in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = status
-            break
-
-def update_job_completed(job_id, output_filename, summary):
-    completed_at = datetime.datetime.now().isoformat()
-    if db_available:
-        try:
-            db['jobs'].update_one(
-                {'job_id': job_id}, 
-                {'$set': {
-                    'status': 'COMPLETED', 
-                    'output_filename': output_filename, 
-                    'result_summary': summary,
-                    'completed_at': completed_at
-                }}
-            )
-            return
-        except Exception as e:
-            print("Error updating job completed in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = 'COMPLETED'
-            j['output_filename'] = output_filename
-            j['result_summary'] = summary
-            j['completed_at'] = completed_at
-            break
-
-def update_job_failed(job_id, error_message):
-    completed_at = datetime.datetime.now().isoformat()
-    if db_available:
-        try:
-            db['jobs'].update_one(
-                {'job_id': job_id}, 
-                {'$set': {
-                    'status': 'FAILED', 
-                    'error_message': error_message,
-                    'completed_at': completed_at
-                }}
-            )
-            return
-        except Exception as e:
-            print("Error updating job failed in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = 'FAILED'
-            j['error_message'] = error_message
-            j['completed_at'] = completed_at
-            break
-
-
-
-
-# Helper to determine raw milk type from finished product type
 def get_milk_type_for_product(product_type):
     ptype = (product_type or '').strip()
     if ptype.endswith(' Cheese'):
@@ -403,9 +145,6 @@ def get_milk_type_for_product(product_type):
         return 'Buffalo Milk'
     return 'Cow Milk'
 
-@app.route('/')
-def serve_index():
-    return send_from_directory(app.static_folder, 'index.html')
 
 # Helper to serialize MongoDB object
 def serialize_node(node):
@@ -414,100 +153,10 @@ def serialize_node(node):
         node_dict['_id'] = str(node_dict['_id'])
     return node_dict
 
-@app.route('/api/nodes', methods=['GET'])
-def get_nodes():
-    # Only return interactive nodes (no network_id or empty network_id) to prevent map performance bottlenecks
-    query = {'$or': [{'network_id': {'$exists': False}}, {'network_id': ''}, {'network_id': None}]}
-    if db_available:
-        try:
-            db_nodes = list(nodes_collection.find(query))
-            return jsonify([serialize_node(n) for n in db_nodes])
-        except Exception as e:
-            print(f"Error fetching from MongoDB: {e}")
-    interactive_nodes = [n for n in in_memory_nodes if not n.get('network_id')]
-    return jsonify(interactive_nodes)
 
-@app.route('/api/nodes', methods=['POST'])
-def add_node():
-    new_node = request.json
-    if not new_node or 'id' not in new_node:
-        return jsonify({'status': 'ERROR', 'message': 'Invalid node data'}), 400
-        
-    # Remove _id to prevent modification of the immutable _id field in MongoDB
-    new_node.pop('_id', None)
 
-    if db_available:
-        try:
-            if nodes_collection.count_documents({'id': new_node['id']}) > 0:
-                nodes_collection.replace_one({'id': new_node['id']}, new_node)
-            else:
-                nodes_collection.insert_one(new_node)
-            saved_node = nodes_collection.find_one({'id': new_node['id']})
-            return jsonify(serialize_node(saved_node)), 201
-        except Exception as e:
-            print(f"Error inserting into MongoDB: {e}")
-            
-    existing_idx = next((i for i, n in enumerate(in_memory_nodes) if n['id'] == new_node['id']), None)
-    if existing_idx is not None:
-        in_memory_nodes[existing_idx] = new_node
-    else:
-        in_memory_nodes.append(new_node)
-    return jsonify(new_node), 201
 
-@app.route('/api/nodes/<node_id>', methods=['PUT'])
-def update_node(node_id):
-    updated_data = request.json
-    if not updated_data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'}), 400
-        
-    updated_data['id'] = node_id
-    
-    # Remove _id to prevent modification of the immutable _id field in MongoDB
-    updated_data.pop('_id', None)
 
-    if db_available:
-        try:
-            nodes_collection.replace_one({'id': node_id}, updated_data, upsert=True)
-            saved_node = nodes_collection.find_one({'id': node_id})
-            return jsonify(serialize_node(saved_node))
-        except Exception as e:
-            print(f"Error updating MongoDB: {e}")
-
-    existing_idx = next((i for i, n in enumerate(in_memory_nodes) if n['id'] == node_id), None)
-    if existing_idx is not None:
-        in_memory_nodes[existing_idx] = updated_data
-    else:
-        in_memory_nodes.append(updated_data)
-    return jsonify(updated_data)
-
-@app.route('/api/nodes/<node_id>', methods=['DELETE'])
-def delete_node(node_id):
-    if db_available:
-        try:
-            nodes_collection.delete_one({'id': node_id})
-            return jsonify({'status': 'SUCCESS'})
-        except Exception as e:
-            print(f"Error deleting from MongoDB: {e}")
-
-    global in_memory_nodes
-    in_memory_nodes = [n for n in in_memory_nodes if n['id'] != node_id]
-    return jsonify({'status': 'SUCCESS'})
-
-@app.route('/api/nodes/reset', methods=['POST'])
-def reset_nodes():
-    # Only reset/delete interactive nodes, keeping the bulk jobs database nodes intact
-    query = {'$or': [{'network_id': {'$exists': False}}, {'network_id': ''}, {'network_id': None}]}
-    if db_available:
-        try:
-            nodes_collection.delete_many(query)
-            db_nodes = list(nodes_collection.find(query))
-            return jsonify([serialize_node(n) for n in db_nodes])
-        except Exception as e:
-            print(f"Error resetting MongoDB: {e}")
-
-    global in_memory_nodes
-    in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id')]
-    return jsonify([])
 
 
 def get_optimal_vehicles(flow, vehicle_limits, caps=None, **kwargs):
@@ -1325,7 +974,6 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
 
 # Background thread processor for jobs
 def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, excel_file_path=None):
-    update_job_status(job_id, 'PROCESSING')
     start_time = time.time()
     
     try:
@@ -2337,295 +1985,23 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 df_supplier_summary = pd.DataFrame(supplier_report_rows)
                 df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
                 
-            update_job_completed(job_id, output_filename, res['summary'])
         else:
-            update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")
-            
+            pass
     except Exception as e:
         import traceback
         error_msg = f"Exception: {str(e)}\n{traceback.format_exc()}"
         print("Job processing failed:", error_msg)
-        update_job_failed(job_id, error_msg[:1000])
 
 
-@app.route('/api/optimize', methods=['POST'])
-def optimize_network():
-    data = request.json
-    if not data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'}), 400
-
-    farmers = data.get('farmers', [])
-    hubs = data.get('hubs', [])
-    plants = data.get('plants', [])
-    transport_cost_per_km = data.get('transport_cost_per_km', 0.005)
-
-    res = solve_network_lp(hubs, plants, transport_cost_per_km)
-    if res.get('status') == 'ERROR':
-        return jsonify(res), 500
-    return jsonify(res)
 
 
-@app.route('/api/jobs/generate_template', methods=['GET'])
-def download_template():
-    try:
-        df = generate_random_network()
-        temp_filename = f"template_{uuid.uuid4().hex[:8]}.xlsx"
-        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-        
-        # Save nodes in DB under network_id
-        network_id = df.iloc[0]['network_id']
-        nodes_list = parse_excel_nodes(df)
-        
-        if db_available:
-            try:
-                nodes_collection.delete_many({'network_id': network_id})
-                nodes_collection.insert_many(nodes_list)
-            except Exception as e:
-                print("Error saving template nodes to Mongo:", e)
-        else:
-            global in_memory_nodes
-            in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id') != network_id]
-            in_memory_nodes.extend(nodes_list)
-            
-        df.to_excel(temp_path, index=False)
-        return send_file(temp_path, as_attachment=True, download_name=f"network_template_{network_id[:8]}.xlsx")
-    except Exception as e:
-        import traceback
-        print("Template generation failed:", traceback.format_exc())
-        return jsonify({'status': 'ERROR', 'message': f'Failed to generate template: {str(e)}'}), 500
 
 
-@app.route('/api/jobs/upload', methods=['POST'])
-def upload_job():
-    if 'file' not in request.files:
-        return jsonify({'status': 'ERROR', 'message': 'No file part in the request'}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'status': 'ERROR', 'message': 'No file selected for uploading'}), 400
-        
-    if file and file.filename.endswith(('.xlsx', '.xls')):
-        filename = secure_filename(file.filename)
-        job_id = str(uuid.uuid4())
-        input_filename = f"input_{job_id}_{filename}"
-        file_path = os.path.join(UPLOAD_FOLDER, input_filename)
-        file.save(file_path)
-        
-        try:
-            nodes = parse_excel_nodes(file_path)
-            if not nodes:
-                return jsonify({'status': 'ERROR', 'message': 'No valid nodes found in the Excel sheet'}), 400
-                
-            network_id = nodes[0].get('network_id')
-            if not network_id:
-                network_id = str(uuid.uuid4())
-                for n in nodes:
-                    n['network_id'] = network_id
-            
-            if db_available:
-                try:
-                    for n in nodes:
-                        nodes_collection.replace_one({'id': n['id'], 'network_id': network_id}, n, upsert=True)
-                except Exception as e:
-                    print("Error saving uploaded nodes to Mongo:", e)
-            else:
-                global in_memory_nodes
-                in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id') != network_id]
-                in_memory_nodes.extend(nodes)
-                
-            job = {
-                'job_id': job_id,
-                'network_id': network_id,
-                'status': 'PENDING',
-                'created_at': datetime.datetime.now().isoformat(),
-                'completed_at': None,
-                'error_message': None,
-                'input_filename': input_filename,
-                'output_filename': None,
-                'result_summary': None,
-                'node_count': len(nodes)
-            }
-            save_new_job(job)
-            
-            thread = threading.Thread(
-                target=process_job_in_background, 
-                args=(job_id, network_id, nodes, 0.02, file_path)
-            )
-            thread.daemon = True
-            thread.start()
-            
-            return jsonify({
-                'status': 'SUCCESS',
-                'message': 'Job uploaded successfully. Solver is running in the background.',
-                'job_id': job_id,
-                'network_id': network_id
-            }), 201
-            
-        except Exception as e:
-            import traceback
-            print("Job upload parsing failed:", traceback.format_exc())
-            return jsonify({'status': 'ERROR', 'message': f'Failed to parse Excel nodes: {str(e)}'}), 500
-            
-    return jsonify({'status': 'ERROR', 'message': 'Invalid file format. Please upload an Excel (.xlsx) file.'}), 400
 
 
-@app.route('/api/jobs', methods=['GET'])
-def get_jobs():
-    jobs = get_all_jobs()
-    serialized = []
-    for j in jobs:
-        j_copy = dict(j)
-        j_copy.pop('_id', None)
-        serialized.append(j_copy)
-    return jsonify(serialized)
 
 
-@app.route('/api/jobs/<job_id>/download', methods=['GET'])
-def download_job_results(job_id):
-    jobs = get_all_jobs()
-    job = next((j for j in jobs if j['job_id'] == job_id), None)
-    
-    if not job:
-        return jsonify({'status': 'ERROR', 'message': 'Job not found'}), 404
-        
-    if job['status'] != 'COMPLETED' or not job['output_filename']:
-        return jsonify({'status': 'ERROR', 'message': 'Job results are not ready for download'}), 400
-        
-    output_path = os.path.join(OUTPUT_FOLDER, job['output_filename'])
-    if not os.path.exists(output_path):
-        return jsonify({'status': 'ERROR', 'message': 'Result file was not found on server'}), 404
-        
-    return send_file(output_path, as_attachment=True, download_name=f"network_results_{job_id[:8]}.xlsx")
 
 
-@app.route('/api/jobs/<job_id>/details', methods=['GET'])
-def get_job_details(job_id):
-    jobs = get_all_jobs()
-    job = next((j for j in jobs if j['job_id'] == job_id), None)
-    
-    if not job:
-        return jsonify({'status': 'ERROR', 'message': 'Job not found'}), 404
-        
-    if job['status'] != 'COMPLETED' or not job['output_filename']:
-        return jsonify({'status': 'ERROR', 'message': 'Job results are not ready'}), 400
-        
-    network_id = job.get('network_id')
-    
-    # 1. Fetch nodes for this network
-    nodes_list = []
-    if db_available:
-        try:
-            db_nodes = list(nodes_collection.find({'network_id': network_id}))
-            nodes_list = [serialize_node(n) for n in db_nodes]
-        except Exception as e:
-            print("Error fetching job nodes from MongoDB:", e)
-    else:
-        nodes_list = [n for n in in_memory_nodes if n.get('network_id') == network_id]
-        
-    # If no nodes saved, return empty
-    if not nodes_list:
-        return jsonify({'status': 'ERROR', 'message': 'Nodes not found for this network'}), 404
-        
-    output_path = os.path.join(OUTPUT_FOLDER, job['output_filename'])
-    if not os.path.exists(output_path):
-        return jsonify({'status': 'ERROR', 'message': 'Result Excel file not found'}), 404
-        
-    try:
-        # 2. Parse Excel file for active routes and node metrics
-        df_routes = pd.read_excel(output_path, 'Routes')
-        df_nodes = pd.read_excel(output_path, 'Nodes')
-        
-        # Filter active routes
-        df_active = df_routes[df_routes['Status'] == 'ACTIVE']
-        
-        routes = []
-        for _, r in df_active.iterrows():
-            routes.append({
-                'id': str(r.get('Route ID', '')),
-                'from_id': str(r.get('From Node ID', '')),
-                'to_id': str(r.get('To Node ID', '')),
-                'from_type': str(r.get('From Type', '')),
-                'to_type': str(r.get('To Type', '')),
-                'flow': float(r.get('Flow', 0.0)),
-                'product_type': str(r.get('Product / Milk Type', '')),
-                'unit': str(r.get('Unit', '')),
-                'distance': float(r.get('Distance (km)', 0.0)),
-                'cost': float(r.get('Transport Cost (₹)', 0.0)),
-                'total_vehicles': int(r.get('Total Vehicles', 0)) if pd.notna(r.get('Total Vehicles')) else 0,
-                'total_vehicle_capacity': float(r.get('Total Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Total Vehicle Capacity (L)')) else 0.0,
-                'excess_vehicle_capacity': float(r.get('Excess Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Excess Vehicle Capacity (L)')) else 0.0
-            })
-            
-        node_metrics = {}
-        for _, row in df_nodes.iterrows():
-            nid = str(row['Node ID'])
-            inflow = float(row.get('Inflow Throughput', 0.0))
-            outflow = float(row.get('Outflow Throughput', 0.0))
-            if nid not in node_metrics:
-                node_metrics[nid] = {'inflow': 0.0, 'outflow': 0.0}
-            node_metrics[nid]['inflow'] += inflow
-            node_metrics[nid]['outflow'] += outflow
-            
-        # Round node metrics
-        for nid in node_metrics:
-            node_metrics[nid]['inflow'] = round(node_metrics[nid]['inflow'], 2)
-            node_metrics[nid]['outflow'] = round(node_metrics[nid]['outflow'], 2)
-            
-        # Read vehicle allocations from 'BMC Vehicle Allocation' sheet if it exists
-        vehicle_allocations = []
-        if 'BMC Vehicle Allocation' in pd.ExcelFile(output_path).sheet_names:
-            df_veh = pd.read_excel(output_path, 'BMC Vehicle Allocation')
-            for _, r in df_veh.iterrows():
-                vehicle_allocations.append({
-                    'bmc_id': str(r.get('BMC ID', '')),
-                    'bmc_name': str(r.get('BMC Name', '')),
-                    'plant_id': str(r.get('Plant ID', '')),
-                    'plant_name': str(r.get('Plant Name', '')),
-                    'product_type': str(r.get('Product / Milk Type', '')),
-                    'flow': float(r.get('Flow Quantity', 0.0)) if pd.notna(r.get('Flow Quantity')) else 0.0,
-                    'total_vehicles': int(r.get('Total Vehicles', 0)) if pd.notna(r.get('Total Vehicles')) else 0,
-                    'total_vehicle_capacity': float(r.get('Total Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Total Vehicle Capacity (L)')) else 0.0,
-                    'excess_vehicle_capacity': float(r.get('Excess Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Excess Vehicle Capacity (L)')) else 0.0,
-                    'vehicle_reason': str(r.get('VehicleReason', 'Supplied')) if pd.notna(r.get('VehicleReason')) else 'Supplied',
-                    'cluster': str(r.get('SupplierCluster', '')) if pd.notna(r.get('SupplierCluster')) else '',
-                    'subcluster': str(r.get('SupplierSubCluster', '')) if pd.notna(r.get('SupplierSubCluster')) else '',
-                    'leave_quantity': float(r.get('LeaveQuantity', 0.0)) if pd.notna(r.get('LeaveQuantity')) else 0.0
-                })
-
-        # Parse subcluster vehicle pools from the input spreadsheet
-        vehicle_pools = {}
-        input_path = os.path.join(UPLOAD_FOLDER, job['input_filename'])
-        if os.path.exists(input_path):
-            vehicle_limits_map = parse_bmc_vehicles(input_path)
-            for bmc_id, info in vehicle_limits_map.items():
-                if isinstance(info, dict) and 'limits' in info:
-                    c = info.get('cluster', '')
-                    sc = info.get('subcluster', '')
-                    key = f"{c}||{sc}"
-                    if key not in vehicle_pools:
-                        vehicle_pools[key] = {
-                        }
-                    limits = info['limits']
-
-        return jsonify({
-            'status': 'SUCCESS',
-            'job_id': job_id,
-            'network_id': network_id,
-            'nodes': nodes_list,
-            'routes': routes,
-            'node_metrics': node_metrics,
-            'summary': job.get('result_summary', {}),
-            'vehicle_allocations': vehicle_allocations,
-            'vehicle_pools': vehicle_pools
-        })
-    except Exception as e:
-        import traceback
-        print("Error parsing Excel for details:", traceback.format_exc())
-        return jsonify({'status': 'ERROR', 'message': f'Failed to parse Excel results: {str(e)}'}), 500
 
 
-if __name__ == '__main__':
-    # Running on port 5001 so it doesn't conflict with any running instance of the original app
-    port = int(os.environ.get('PORT', 5001))
-    print(f"Starting SupplierNetworkMap on port {port}...")
-    app.run(debug=True, use_reloader=False, port=port)
