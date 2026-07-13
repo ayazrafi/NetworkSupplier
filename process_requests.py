@@ -3,7 +3,7 @@ import os
 import time
 from datetime import datetime
 import pandas as pd
-import requests
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,16 +23,18 @@ import optimizer_solver
 
 def fetch_master_data():
     try:
-        r = requests.get('https://apinode1.secutrak.in/mobileApiDairyM/getCustomerLocationMapping', timeout=30)
-        return r.json().get('data', [])
+        with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
+            r = client.get('https://apinode1.secutrak.in/mobileApiDairyM/getCustomerLocationMapping')
+            return r.json().get('data', [])
     except Exception as e:
         print(f"Error fetching master data: {e}")
         return []
 
 def fetch_distance_data():
     try:
-        r = requests.post('https://apinode1.secutrak.in/mobileApiDairyM/getRoutesDistance', json={"AccessToken":"40Y8h3xcr3nGBOQ154d154PH23mSj770"}, timeout=30)
-        return r.json().get('data', [])
+        with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
+            r = client.post('https://apinode1.secutrak.in/mobileApiDairyM/getRoutesDistance', json={"AccessToken":"40Y8h3xcr3nGBOQ154d154PH23mSj770"})
+            return r.json().get('data', [])
     except Exception as e:
         print(f"Error fetching distance data: {e}")
         return []
