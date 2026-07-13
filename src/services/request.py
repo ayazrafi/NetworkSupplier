@@ -9,7 +9,8 @@ from src.repositories.request import (
     RequestPlantsRepository,
     RequestMMCsRepository,
     RequestVehiclesRepository,
-    RequestSettingsRepository
+    RequestSettingsRepository,
+    RequestPlantSupplierMappingRepository
 )
 
 class RequestService:
@@ -19,6 +20,7 @@ class RequestService:
         self.mmc_repository = RequestMMCsRepository()
         self.vehicles_repository = RequestVehiclesRepository()
         self.settings_repository = RequestSettingsRepository()
+        self.mapping_repository = RequestPlantSupplierMappingRepository()
 
     async def _generate_request_id(self) -> str:
         db = DatabaseConnection.get_db()
@@ -100,6 +102,20 @@ class RequestService:
             "createdOn": now
         }
         await self.settings_repository.create(settings_doc)
+
+        # 6. Save Request Plant Supplier Mappings
+        mapping_docs = [
+            {
+                "requestId": request_id,
+                "OptimizationRequestId": opt_req_id,
+                "plantCode": p.plantCode,
+                "supplierCode": p.supplierCode,
+                "productCode": p.productCode
+            }
+            for p in request_in.plantSupplierMapping
+        ]
+        if mapping_docs:
+            await self.mapping_repository.collection.insert_many(mapping_docs)
 
         return created_opt_req
 

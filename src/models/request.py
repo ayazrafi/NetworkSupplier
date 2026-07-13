@@ -18,11 +18,17 @@ class RequestVehicleInput(BaseModel):
     vehicleType: str
     count: int
 
+class RequestPlantSupplierMappingInput(BaseModel):
+    plantCode: str
+    supplierCode: str
+    productCode: str
+
 class RequestCreateInput(BaseModel):
     requestName: str
     plants: List[RequestPlantInput]
     mmcs: List[RequestMMCInput]
     vehicles: List[RequestVehicleInput] = Field(..., validation_alias="vechicles")
+    plantSupplierMapping: List[RequestPlantSupplierMappingInput]
     maxDistance: int
     leaveQuantity: int = 0
 

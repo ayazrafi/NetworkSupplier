@@ -32,236 +32,18 @@ except Exception as e:
     db_available = False
 
 in_memory_jobs = []
-public_osrm_failed = False
 
-MAX_DISTANCE_LIMIT = 650.0
+MAX_DISTANCE_LIMIT = 800.0
 
-DEFAULT_NODES = [
-    { 
-        "id": "F1", 
-        "name": "Anand Cooperatives", 
-        "type": "farmer", 
-        "products": [
-            { "type": "Cow Milk", "supply": 6000 },
-            { "type": "Buffalo Milk", "supply": 4000 }
-        ],
-        "lat": 22.5645, 
-        "lng": 72.9289 
-    },
-    { 
-        "id": "F2", 
-        "name": "Nadiad Farmers", 
-        "type": "farmer", 
-        "products": [
-            { "type": "Cow Milk", "supply": 4000 }
-        ],
-        "lat": 22.6916, 
-        "lng": 72.8634 
-    },
-    { 
-        "id": "F3", 
-        "name": "Kheda Milk Union", 
-        "type": "farmer", 
-        "products": [
-            { "type": "Buffalo Milk", "supply": 5000 }
-        ],
-        "lat": 22.7533, 
-        "lng": 72.6819 
-    },
-    { 
-        "id": "H1", 
-        "name": "BMC Nadiad", 
-        "type": "hub", 
-        "subtype": "BMC", 
-        "products": [
-            { "type": "Cow Milk", "capacity": 7000, "processing_cost": 0.15 },
-            { "type": "Buffalo Milk", "capacity": 5000, "processing_cost": 0.20 }
-        ],
-        "lat": 22.6700, 
-        "lng": 72.8800 
-    },
-    { 
-        "id": "H2", 
-        "name": "MCC Kheda", 
-        "type": "hub", 
-        "subtype": "MCC", 
-        "products": [
-            { "type": "Cow Milk", "capacity": 8000, "processing_cost": 0.20 }
-        ],
-        "lat": 22.7200, 
-        "lng": 72.7100 
-    },
-    { 
-        "id": "P1", 
-        "name": "Amul Cheese Plant", 
-        "type": "plant", 
-        "inflow_milks": [
-            { "type": "Cow Milk", "capacity": 8000, "processing_cost": 0.50 },
-            { "type": "Buffalo Milk", "capacity": 6000, "processing_cost": 0.60 }
-        ],
-        "products": [
-            { "type": "Cow Cheese", "yield": 0.10 }, 
-            { "type": "Cow Liquid Milk", "yield": 1.0 },
-            { "type": "Buffalo Cheese", "yield": 0.10 }
-        ], 
-        "capacity": 10000, 
-        "processing_cost": 0.60, 
-        "lat": 22.5800, 
-        "lng": 72.9500 
-    },
-    { 
-        "id": "P2", 
-        "name": "Anand Dairy", 
-        "type": "plant", 
-        "inflow_milks": [
-            { "type": "Cow Milk", "capacity": 9000, "processing_cost": 0.40 },
-            { "type": "Buffalo Milk", "capacity": 5000, "processing_cost": 0.50 }
-        ],
-        "products": [
-            { "type": "Cow Liquid Milk", "yield": 1.0 }, 
-            { "type": "Cow Khoya", "yield": 0.20 }, 
-            { "type": "Buffalo Butter", "yield": 0.06 }
-        ], 
-        "capacity": 12000, 
-        "processing_cost": 0.40, 
-        "lat": 22.5400, 
-        "lng": 72.9100 
-    },
-    { 
-        "id": "G1", 
-        "name": "Ahmedabad Metro", 
-        "type": "geography", 
-        "products": [
-            { "type": "Cow Liquid Milk", "demand": 8000, "price": 60.00 }, 
-            { "type": "Cow Cheese", "demand": 400, "price": 700.00 }
-        ], 
-        "lat": 23.0225, 
-        "lng": 72.5714 
-    },
-    { 
-        "id": "G2", 
-        "name": "Vadodara City", 
-        "type": "geography", 
-        "products": [
-            { "type": "Buffalo Cheese", "demand": 600, "price": 750.00 }, 
-            { "type": "Buffalo Butter", "demand": 150, "price": 550.00 }
-        ], 
-        "lat": 22.3072, 
-        "lng": 73.1812 
-    },
-    { 
-        "id": "G3", 
-        "name": "Nadiad Market", 
-        "type": "geography", 
-        "products": [
-            { "type": "Cow Khoya", "demand": 400, "price": 400.00 }, 
-            { "type": "Cow Liquid Milk", "demand": 2000, "price": 60.00 }
-        ], 
-        "lat": 22.6948, 
-        "lng": 72.8223 
-    },
-    { 
-        "id": "G4", 
-        "name": "Kheda Town", 
-        "type": "geography", 
-        "products": [
-            { "type": "Buffalo Butter", "demand": 180, "price": 550.00 }, 
-            { "type": "Cow Milk Powder", "demand": 100, "price": 420.00 }
-        ], 
-        "lat": 22.7580, 
-        "lng": 72.6850 
-    }
-]
+in_memory_nodes = []
 
-in_memory_nodes = list(DEFAULT_NODES)
-
-# Seed MongoDB with default nodes if it is empty
-if db_available:
-    try:
-        if nodes_collection.count_documents({}) == 0:
-            nodes_collection.insert_many(DEFAULT_NODES)
-            print("Successfully seeded MongoDB with default nodes.")
-    except Exception as e:
-        print(f"Error seeding MongoDB: {e}")
-        db_available = False
-
-
-# Helper function to compute Haversine distance in kilometers
-def calculate_haversine_distance(node1, node2):
-    R = 6371.0  # Earth's radius in kilometers
-    
-    lat1 = math.radians(node1.get('lat', 0.0))
-    lon1 = math.radians(node1.get('lng', 0.0))
-    lat2 = math.radians(node2.get('lat', 0.0))
-    lon2 = math.radians(node2.get('lng', 0.0))
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    
-    a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
-    distance = R * c
-    return distance
 
 import urllib.request
 import json
 
 _distance_cache = {}
-local_osrm_5002_failed = False
-local_osrm_5000_failed = False
 
-# Compute actual road path distance using self-hosted or free public OSRM routing engine
-def get_road_distance(node1, node2):
-    global local_osrm_5002_failed, local_osrm_5000_failed
-    pair_key = tuple(sorted([node1.get('id'), node2.get('id')]))
-    if pair_key in _distance_cache:
-        return _distance_cache[pair_key]
-        
-    lat1 = node1.get('lat', 0.0)
-    lon1 = node1.get('lng', 0.0)
-    lat2 = node2.get('lat', 0.0)
-    lon2 = node2.get('lng', 0.0)
-    
-    # Check local OSRM services (port 5002 or 5000), then public OSRM demo API
-    urls = []
-    if not local_osrm_5002_failed:
-        urls.append((5002, f"http://localhost:5002/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"))
-    if not local_osrm_5000_failed:
-        urls.append((5000, f"http://localhost:5000/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"))
-    if not public_osrm_failed:
-        urls.append((80, f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=false"))
-        
-    h_dist = calculate_haversine_distance(node1, node2)
-    
-    for port, url in urls:
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'GeoFlowOptimizer'})
-            # Localhost is instant, public might take slightly longer
-            timeout_val = 0.3 if port in (5002, 5000) else 1.5
-            with urllib.request.urlopen(req, timeout=timeout_val) as response:
-                res_data = json.loads(response.read().decode())
-                if res_data.get('code') == 'Ok' and res_data.get('routes'):
-                    dist = res_data['routes'][0]['distance'] / 1000.0
-                    # Sanity check: if OSRM returned 0/near-zero distance but Haversine distance is > 1.0 km,
-                    # it means OSRM snapped to the same boundary node due to limited local map extract.
-                    if dist < 0.1 and h_dist > 1.0:
-                        continue
-                    _distance_cache[pair_key] = dist
-                    return dist
-        except Exception as e:
-            if port == 5002:
-                print(f"Local OSRM on port 5002 failed: {e}. Latch-failing it.")
-                local_osrm_5002_failed = True
-            elif port == 5000:
-                print(f"Local OSRM on port 5000 failed: {e}. Latch-failing it.")
-                local_osrm_5000_failed = True
-            continue
-            
-    # Fallback to straight-line Haversine distance
-    fallback_dist = h_dist
-    _distance_cache[pair_key] = fallback_dist
-    return fallback_dist
+
 
 
 # Directory setup for Excel jobs
@@ -271,105 +53,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
-# OSRM Table API helper to fetch road distances in bulk for candidate pairs
-def get_osrm_distances_for_candidates(source_node, candidate_nodes):
-    global public_osrm_failed, local_osrm_5002_failed, local_osrm_5000_failed
-    coords = [f"{source_node['lng']},{source_node['lat']}"]
-    for c in candidate_nodes:
-        coords.append(f"{c['lng']},{c['lat']}")
-        
-    coords_str = ";".join(coords)
-    sources = "0"
-    destinations = ";".join(str(i) for i in range(1, len(coords)))
-    
-    # Try local OSRM table endpoints
-    local_urls = []
-    if not local_osrm_5002_failed:
-        local_urls.append((5002, f"http://localhost:5002/table/v1/driving/{coords_str}?sources={sources}&destinations={destinations}&annotations=distance"))
-    if not local_osrm_5000_failed:
-        local_urls.append((5000, f"http://localhost:5000/table/v1/driving/{coords_str}?sources={sources}&destinations={destinations}&annotations=distance"))
-        
-    for port, url in local_urls:
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'GeoFlowOptimizer'})
-            with urllib.request.urlopen(req, timeout=0.3) as response:
-                res_data = json.loads(response.read().decode())
-                if res_data.get('code') == 'Ok' and 'distances' in res_data:
-                    row_distances = res_data['distances'][0]
-                    # Check if any distance returned is invalid (0.0 but Haversine > 1.0)
-                    results = {}
-                    has_invalid = False
-                    for idx, c in enumerate(candidate_nodes):
-                        val = row_distances[idx]
-                        h_dist = calculate_haversine_distance(source_node, c)
-                        if val is not None:
-                            val_km = val / 1000.0
-                            if val_km < 0.1 and h_dist > 1.0:
-                                has_invalid = True
-                                break
-                            results[c['id']] = val_km
-                        else:
-                            results[c['id']] = h_dist
-                    if not has_invalid:
-                        # Write to global cache
-                        for idx, c in enumerate(candidate_nodes):
-                            val = row_distances[idx]
-                            h_dist = calculate_haversine_distance(source_node, c)
-                            pair_key = tuple(sorted([source_node['id'], c['id']]))
-                            _distance_cache[pair_key] = val / 1000.0 if val is not None else h_dist
-                        return results
-                    else:
-                        print(f"Local OSRM on port {port} returned snapped/invalid distances. Latch-failing it.")
-                        if port == 5002:
-                            local_osrm_5002_failed = True
-                        elif port == 5000:
-                            local_osrm_5000_failed = True
-        except Exception as e:
-            print(f"Local OSRM table on port {port} failed: {e}. Latch-failing it.")
-            if port == 5002:
-                local_osrm_5002_failed = True
-            elif port == 5000:
-                local_osrm_5000_failed = True
-            continue
-            
-    # Try public OSRM Table API (if not latch-failed)
-    if not public_osrm_failed:
-        url = f"https://router.project-osrm.org/table/v1/driving/{coords_str}?sources={sources}&destinations={destinations}&annotations=distance"
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'GeoFlowOptimizer'})
-            with urllib.request.urlopen(req, timeout=1.0) as response:
-                res_data = json.loads(response.read().decode())
-                if res_data.get('code') == 'Ok' and 'distances' in res_data:
-                    row_distances = res_data['distances'][0]
-                    results = {}
-                    for idx, c in enumerate(candidate_nodes):
-                        val = row_distances[idx]
-                        h_dist = calculate_haversine_distance(source_node, c)
-                        pair_key = tuple(sorted([source_node['id'], c['id']]))
-                        if val is not None:
-                            val_km = val / 1000.0
-                            if val_km < 0.1 and h_dist > 1.0:
-                                _distance_cache[pair_key] = h_dist
-                                results[c['id']] = h_dist
-                            else:
-                                _distance_cache[pair_key] = val_km
-                                results[c['id']] = val_km
-                        else:
-                            _distance_cache[pair_key] = h_dist
-                            results[c['id']] = h_dist
-                    return results
-        except Exception as e:
-            print("Public OSRM Table API failed or rate-limited. Falling back to Haversine.", e)
-            public_osrm_failed = True
-            
-    # Haversine fallback for all candidates
-    fallback_results = {}
-    for c in candidate_nodes:
-        h_dist = calculate_haversine_distance(source_node, c)
-        pair_key = tuple(sorted([source_node['id'], c['id']]))
-        _distance_cache[pair_key] = h_dist
-        fallback_results[c['id']] = h_dist
-    return fallback_results
+
 
 
 # Excel random network generator containing 1000 nodes and UUID network_id
@@ -377,35 +61,6 @@ def generate_random_network():
     network_id = str(uuid.uuid4())
     rows = []
     
-    # 300 Farmers
-    for i in range(1, 301):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        # Cow Milk
-        rows.append({
-            'node_id': f"F{i}",
-            'name': f"Farmer {i}",
-            'type': 'farmer',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Milk',
-            'supply': random.randint(1000, 8000),
-            'network_id': network_id
-        })
-        # Buffalo Milk
-        rows.append({
-            'node_id': f"F{i}",
-            'name': f"Farmer {i}",
-            'type': 'farmer',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Milk',
-            'supply': random.randint(500, 5000),
-            'network_id': network_id
-        })
-        
     # 200 Hubs
     for i in range(1, 201):
         lat = round(random.uniform(21.5, 23.5), 4)
@@ -530,63 +185,7 @@ def generate_random_network():
             'network_id': network_id
         })
         
-    # 400 Geographies
-    for i in range(1, 401):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        # Cow Liquid Milk demand/price
-        rows.append({
-            'node_id': f"G{i}",
-            'name': f"Market {i}",
-            'type': 'geography',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Liquid Milk',
-            'demand': random.randint(1000, 5000),
-            'price': round(random.uniform(55.0, 65.0), 1),
-            'network_id': network_id
-        })
-        # Buffalo Cheese demand/price
-        rows.append({
-            'node_id': f"G{i}",
-            'name': f"Market {i}",
-            'type': 'geography',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Cheese',
-            'demand': random.randint(50, 300),
-            'price': round(random.uniform(700.0, 800.0), 1),
-            'network_id': network_id
-        })
-        # Cow Khoya demand/price
-        rows.append({
-            'node_id': f"G{i}",
-            'name': f"Market {i}",
-            'type': 'geography',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Khoya',
-            'demand': random.randint(50, 200),
-            'price': round(random.uniform(350.0, 450.0), 1),
-            'network_id': network_id
-        })
-        # Buffalo Butter demand/price
-        rows.append({
-            'node_id': f"G{i}",
-            'name': f"Market {i}",
-            'type': 'geography',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Butter',
-            'demand': random.randint(20, 100),
-            'price': round(random.uniform(520.0, 620.0), 1),
-            'network_id': network_id
-        })
-        
+
     df = pd.DataFrame(rows)
     all_cols = [
         'node_id', 'name', 'type', 'subtype', 'lat', 'lng', 
@@ -652,16 +251,7 @@ def parse_excel_nodes(file_path_or_df):
             'network_id': clean_str(first_row.get('network_id'))
         }
         
-        if node_type == 'farmer':
-            supply_dict = {}
-            for _, row in group.iterrows():
-                commodity = clean_str(row.get('commodity'))
-                supply = clean_float(row.get('supply'))
-                if commodity and supply > 0:
-                    supply_dict[commodity] = supply_dict.get(commodity, 0.0) + supply
-            node['products'] = [{'type': k, 'supply': v} for k, v in supply_dict.items()]
-            
-        elif node_type == 'hub':
+        if node_type == 'hub':
             products_dict = {}
             for _, row in group.iterrows():
                 commodity = clean_str(row.get('commodity'))
@@ -719,23 +309,7 @@ def parse_excel_nodes(file_path_or_df):
             node['capacity'] = sum(m['capacity'] for m in node['inflow_milks']) if node['inflow_milks'] else sum(d['demand'] for d in node['demands'])
             node['processing_cost'] = node['inflow_milks'][0]['processing_cost'] if node['inflow_milks'] else (node['demands'][0]['processing_cost'] if node['demands'] else 0.40)
             
-        elif node_type == 'geography':
-            demand_dict = {}
-            for _, row in group.iterrows():
-                commodity = clean_str(row.get('commodity'))
-                demand = clean_float(row.get('demand'))
-                price = clean_float(row.get('price'))
-                if commodity and demand > 0:
-                    if commodity not in demand_dict:
-                        demand_dict[commodity] = {'demand': 0.0, 'price': price}
-                    demand_dict[commodity]['demand'] += demand
-                    demand_dict[commodity]['price'] = price
-            node['products'] = [{
-                'type': k,
-                'demand': v['demand'],
-                'price': v['price']
-            } for k, v in demand_dict.items()]
-            
+
         nodes.append(node)
     return nodes
 
@@ -817,18 +391,7 @@ def update_job_failed(job_id, error_message):
             break
 
 
-# Yield factor per dairy product type
-def get_yield_factor(product_type):
-    ptype = (product_type or '').strip().lower()
-    if 'cheese' in ptype:
-        return 0.10      # 10 L milk = 1 kg cheese
-    elif 'khoya' in ptype:
-        return 0.20      # 5 L milk = 1 kg khoya
-    elif 'butter' in ptype:
-        return 0.06      # 16.7 L milk = 1 kg butter
-    elif 'milk powder' in ptype:
-        return 0.12      # 8.3 L milk = 1 kg milk powder
-    return 1.0           # Liquid Milk or fallback
+
 
 # Helper to determine raw milk type from finished product type
 def get_milk_type_for_product(product_type):
@@ -937,7 +500,6 @@ def reset_nodes():
     if db_available:
         try:
             nodes_collection.delete_many(query)
-            nodes_collection.insert_many(DEFAULT_NODES)
             db_nodes = list(nodes_collection.find(query))
             return jsonify([serialize_node(n) for n in db_nodes])
         except Exception as e:
@@ -945,19 +507,20 @@ def reset_nodes():
 
     global in_memory_nodes
     in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id')]
-    in_memory_nodes.extend(DEFAULT_NODES)
-    return jsonify(list(DEFAULT_NODES))
+    return jsonify([])
 
 
 def get_optimal_vehicles(flow, vehicle_limits, caps=None, **kwargs):
     if caps is None:
-        caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0}
+        caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
     if isinstance(vehicle_limits, dict) and 'limits' in vehicle_limits:
         vehicle_limits = vehicle_limits['limits']
 
     if flow <= 0:
         return {}
         
+
+    
     sorted_caps = sorted(caps.items(), key=lambda x: x[1], reverse=True)
         
     # fallback greedy
@@ -989,10 +552,22 @@ def get_optimal_vehicles(flow, vehicle_limits, caps=None, **kwargs):
             vars_dict[name] = solver.IntVar(0, limit, f"count_{name}")
             
         solver.Add(sum(vars_dict[name] * cap for name, cap in caps.items()) >= flow)
-        solver.Minimize(
-            100000.0 * sum(vars_dict[name] for name in caps) +
-            1.0 * sum(vars_dict[name] * cap for name, cap in caps.items())
-        )
+        strategy = kwargs.get('strategy', 'Least Vehicle Strategy')
+        
+        if str(strategy).strip().lower() == 'least vehicle strategy':
+            # Priority 1: Minimize number of vehicles
+            # Priority 2: Minimize total capacity (wasted space)
+            solver.Minimize(
+                100000.0 * sum(vars_dict[name] for name in caps) +
+                1.0 * sum(vars_dict[name] * cap for name, cap in caps.items())
+            )
+        else:
+            # Priority 1: Minimize total capacity (wasted space)
+            # Priority 2: Minimize number of vehicles (tie-breaker)
+            solver.Minimize(
+                1.0 * sum(vars_dict[name] for name in caps) +
+                100.0 * sum(vars_dict[name] * cap for name, cap in caps.items())
+            )
         
         status = solver.Solve()
         if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
@@ -1007,12 +582,11 @@ def get_optimal_vehicles(flow, vehicle_limits, caps=None, **kwargs):
         return get_fallback()
 
 
-def get_vehicles_round_down(flow, vehicle_limits, caps=None):
+def get_vehicles_round_down(flow, vehicle_limits, caps=None, **kwargs):
     if caps is None:
-        caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0}
+        caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
     if isinstance(vehicle_limits, dict) and 'limits' in vehicle_limits:
         vehicle_limits = vehicle_limits['limits']
-
     sorted_caps = sorted(caps.items(), key=lambda x: x[1], reverse=True)
 
     def greedy_fallback():
@@ -1039,8 +613,12 @@ def get_vehicles_round_down(flow, vehicle_limits, caps=None):
             vars_dict[name] = solver.IntVar(0, limit, f"rd_{name}")
 
         total_cap_expr = sum(vars_dict[n] * c for n, c in caps.items())
+        total_veh_expr = sum(vars_dict[n] for n in caps)
+        
         solver.Add(total_cap_expr <= flow)
-        solver.Maximize(total_cap_expr)
+        
+        # Always maximize capacity as priority 1, but minimize vehicles as priority 2 to break ties
+        solver.Maximize(100.0 * total_cap_expr - 1.0 * total_veh_expr)
         
         status = solver.Solve()
         if status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -1074,7 +652,7 @@ def parse_plant_bmc_mapping(excel_file_path):
 def parse_bmc_vehicles(excel_file_path):
     vehicle_limits_map = {}
     if not excel_file_path or not os.path.exists(excel_file_path):
-        vehicle_limits_map['global_caps'] = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0}
+        vehicle_limits_map['global_caps'] = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
         return vehicle_limits_map
         
     try:
@@ -1093,10 +671,22 @@ def parse_bmc_vehicles(excel_file_path):
                     vc = str(row[code_col]).strip()
                     to_val = float(row[to_col]) if pd.notnull(row[to_col]) else 0.0
                     caps[vc] = to_val * 1000.0
+                    
+                    # Fix for V35: The user set 'To' = 5000 in Excel as a hack to mean "unlimited upper bound"
+                    # for the flow filter, but this makes the physical vehicle capacity 5,000,000 L.
+                    # This breaks the 15% empty space rule (e.g. 37,180 flow leaves ~4.96M empty space).
+                    # We restrict V35's physical capacity to a realistic 40,000 L (40 KL tanker).
+                    if vc == 'V35' and caps[vc] > 100000:
+                        caps[vc] = 40000.0
         
         # Fallback
         if not caps:
-            caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0}
+            caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
+            
+        if 'V30' not in caps:
+            caps['V30'] = 35000.0
+        if 'V35' not in caps:
+            caps['V35'] = 35000.0
             
         vehicle_limits_map['global_caps'] = caps
 
@@ -1140,7 +730,7 @@ def parse_bmc_vehicles(excel_file_path):
                             c_name = vehicle_cols.get(vc)
                             limits[vc] = float(row[c_name]) if (c_name and pd.notna(row[c_name])) else 1000000.0
                             
-                        strategy = str(row[col_strat]).strip() if col_strat and pd.notna(row[col_strat]) else "Whole Milk Supply"
+                        strategy = str(row[col_strat]).strip() if col_strat and pd.notna(row[col_strat]) else "Least Vehicle Strategy"
                         margin_low = float(row[col_margin_low]) if col_margin_low and pd.notna(row[col_margin_low]) else 5.0
                         margin_high = float(row[col_margin_high]) if col_margin_high and pd.notna(row[col_margin_high]) else 5.0
                         cluster = str(row[col_cluster]).strip() if col_cluster and pd.notna(row[col_cluster]) else ""
@@ -1161,7 +751,7 @@ def parse_bmc_vehicles(excel_file_path):
     return vehicle_limits_map
 
 
-def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0.02, excel_file_path=None):
+def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=None):
     plant_bmc_mapping = parse_plant_bmc_mapping(excel_file_path)
     try:
         from ortools.linear_solver import pywraplp
@@ -1185,12 +775,12 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
         pass
 
     # Initialize solver
-    solver = pywraplp.Solver.CreateSolver('GLOP')
+    solver = pywraplp.Solver.CreateSolver('SCIP')
     if not solver:
         return {'status': 'ERROR', 'message': 'Could not create GLOP solver.'}
 
     # Pre-calculate candidate distances using OSRM Table API
-    total_nodes_count = len(hubs) + len(plants) + len(geographies)
+    total_nodes_count = len(hubs) + len(plants)
     is_large = total_nodes_count > 50
     dist_cache = {}
     
@@ -1248,22 +838,16 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
     for h in hubs:
         for p in plants:
             if (h['id'], p['id']) not in dist_cache:
-                dist_cache[(h['id'], p['id'])] = calculate_haversine_distance(h, p)
+                dist_cache[(h['id'], p['id'])] = 9999.0
                 
-    # 2. Plant -> Geography
-    for g in geographies:
-        for p in plants:
-            if (p['id'], g['id']) not in dist_cache:
-                dist_cache[(p['id'], g['id'])] = calculate_haversine_distance(p, g)
+
 
     # Helper to resolve distance
     def get_pair_dist(node1, node2):
         key = (node1['id'], node2['id'])
         if key in dist_cache:
             return dist_cache[key]
-        if is_large:
-            return calculate_haversine_distance(node1, node2)
-        return get_road_distance(node1, node2)
+        return 9999.0
 
     # Dynamically extract all raw milk types present in hubs
     milk_types = set()
@@ -1295,7 +879,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
             
             p_products = p.get('products', [])
             if not p_products and 'production_type' in p:
-                p_products = [{'type': p['production_type'], 'yield': get_yield_factor(p['production_type'])}]
+                p_products = [{'type': p['production_type']}]
             p_milk_types = {get_milk_type_for_product(prod['type']) for prod in p_products if 'type' in prod}
             
             common_milk = h_types.intersection(p_milk_types.union(p_demand_types))
@@ -1311,32 +895,10 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                         name = f"flow_H_{h['id']}_P_{p['id']}_{clean_m}"
                         flow_h_p[(h['id'], p['id'], m)] = solver.NumVar(0, solver.infinity(), name)
 
-    # Flow: Plant -> Geography (flow is in physical units of product, e.g., kg/L, per product)
-    flow_p_g = {}
-    for p in plants:
-        p_products = p.get('products', [])
-        if not p_products and 'production_type' in p:
-            p_products = [{'type': p['production_type'], 'yield': get_yield_factor(p['production_type'])}]
-            
-        for g in geographies:
-            if is_large and (p['id'], g['id']) not in dist_cache:
-                continue
-            g_products = g.get('products', [])
-            if not g_products and 'product_type' in g:
-                g_products = [{'type': g['product_type'], 'demand': g.get('demand', 0), 'price': g.get('price', 0)}]
-                
-            common_types = set(prod['type'] for prod in p_products if 'type' in prod).intersection(set(prod['type'] for prod in g_products if 'type' in prod))
-            if common_types:
-                dist = get_pair_dist(p, g)
-                if dist <= MAX_DISTANCE_LIMIT:
-                    for ptype in common_types:
-                        clean_ptype = ptype.replace(' ', '_').replace('-', '_')
-                        name = f"flow_P_{p['id']}_G_{g['id']}_{clean_ptype}"
-                        flow_p_g[(p['id'], g['id'], ptype)] = solver.NumVar(0, solver.infinity(), name)
-
     # Precompute nearest plant map for each hub and milk type
     nearest_plant_map = {}
     for h in hubs:
+        dev_vars = []
         for m in milk_types:
             compatible_plants = [p for p in plants if (h['id'], p['id'], m) in flow_h_p]
             if compatible_plants:
@@ -1363,6 +925,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
     # Precompute plant inflows for the Even Distribution Rule (using required flow only)
     plant_inflow_vars = {}
     for p in plants:
+        dev_vars = []
         for m in milk_types:
             plant_inflow_vars[(p['id'], m)] = [
                 flow_required[(h_other['id'], p['id'], m)]
@@ -1370,13 +933,14 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                 if (h_other['id'], p['id'], m) in flow_h_p
             ]
 
-    # 1. Hub supply limits (per milk type)
+    # 1. Hub supply full milk limits (per milk type)
     for h in hubs:
         h_prods = h.get('products', [])
         if not h_prods and 'capacity' in h:
             h_prods = [{'type': 'Cow Milk', 'capacity': h['capacity'], 'processing_cost': h.get('processing_cost', 0)}]
         capacity_dict = {p['type']: p.get('capacity', 0) for p in h_prods if 'type' in p}
         
+        dev_vars = []
         for m in milk_types:
             flow_out_vars = [flow_h_p[(h['id'], p['id'], m)] for p in plants if (h['id'], p['id'], m) in flow_h_p]
             cap_limit = capacity_dict.get(m, 0)
@@ -1384,50 +948,9 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                 if flow_out_vars:
                     slack = solver.NumVar(0, solver.infinity(), f"slack_hub_{h['id']}_{m.replace(' ', '_')}")
                     solver.Add(sum(flow_out_vars) + slack == cap_limit)
-                    slack_vars.append(slack * 10000000.0)
+                    slack_vars.append(slack * 100000.0)
                     
-                    # Even Distribution Rule (Equalize total plant inflows proportionally to plant demands)
-                    eligible_plants = [p for p in plants if (h['id'], p['id'], m) in flow_h_p]
-                    if len(eligible_plants) > 1:
-                        clean_m = m.replace(' ', '_').replace('-', '_')
-                        for i in range(len(eligible_plants) - 1):
-                            p1 = eligible_plants[i]
-                            p2 = eligible_plants[i + 1]
-                            
-                            # Resolve capacities or demands for plant 1
-                            inflow_milks1 = p1.get('inflow_milks', [])
-                            cap_dict1 = {x['type']: x.get('capacity', 0) for x in inflow_milks1 if 'type' in x}
-                            cap1 = cap_dict1.get(m, 0)
-                            if cap1 <= 0:
-                                demands1 = p1.get('demands', []) or []
-                                demands_dict1 = {x['type']: x.get('demand', 0) for x in demands1 if 'type' in x}
-                                cap1 = demands_dict1.get(m, 0)
-                            if cap1 <= 0:
-                                cap1 = p1.get('capacity', 0)
-                            if cap1 <= 0:
-                                cap1 = 1.0
-                                
-                            # Resolve capacities or demands for plant 2
-                            inflow_milks2 = p2.get('inflow_milks', [])
-                            cap_dict2 = {x['type']: x.get('capacity', 0) for x in inflow_milks2 if 'type' in x}
-                            cap2 = cap_dict2.get(m, 0)
-                            if cap2 <= 0:
-                                demands2 = p2.get('demands', []) or []
-                                demands_dict2 = {x['type']: x.get('demand', 0) for x in demands2 if 'type' in x}
-                                cap2 = demands_dict2.get(m, 0)
-                            if cap2 <= 0:
-                                cap2 = p2.get('capacity', 0)
-                            if cap2 <= 0:
-                                cap2 = 1.0
-                            
-                            # Sum of all inflows to p1 and p2 for commodity m
-                            total_inflow_p1 = sum(plant_inflow_vars.get((p1['id'], m), []))
-                            total_inflow_p2 = sum(plant_inflow_vars.get((p2['id'], m), []))
-                            
-                            diff = solver.NumVar(0, solver.infinity(), f"diff_H_{h['id']}_P1_{p1['id']}_P2_{p2['id']}_{clean_m}")
-                            solver.Add(total_inflow_p1 * (1.0 / cap1) - total_inflow_p2 * (1.0 / cap2) <= diff)
-                            solver.Add(total_inflow_p2 * (1.0 / cap2) - total_inflow_p1 * (1.0 / cap1) <= diff)
-                            slack_vars.append(diff * 100000.0)
+                    # [REMOVED] Even distribution is now handled in Stage 2 lexicographic optimization.
 
             else:
                 if flow_out_vars:
@@ -1437,8 +960,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
     for p in plants:
         p_products = p.get('products', [])
         if not p_products and 'production_type' in p:
-            p_products = [{'type': p['production_type'], 'yield': get_yield_factor(p['production_type'])}]
-        p_yields = {prod['type']: prod.get('yield', 1.0) for prod in p_products if 'type' in prod}
+            p_products = [{'type': p['production_type']}]
         
         p_demands = p.get('demands', [])
         demand_dict = {d['type']: d.get('demand', 0) for d in p_demands if 'type' in d}
@@ -1467,6 +989,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
         slack_vars.append(trans_BM_FCM * 10.0)
         slack_vars.append(trans_FCM_MM * 10.0)
         
+        dev_vars = []
         for m in milk_types:
             flow_in_m = sum(flow_h_p[(h['id'], p['id'], m)] for h in hubs if (h['id'], p['id'], m) in flow_h_p)
             
@@ -1494,37 +1017,14 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
             if req_inflow_vars:
                 solver.Add(sum(req_inflow_vars) <= r_limit)
             
-            if m in demand_dict:
-                # Soft plant demand capacity constraint (2-tier Excel mode)
+            cap_limit = demand_dict.get(m, capacity_dict.get(m, 0))
+            if cap_limit > 0:
+                # Soft capacity limit: effective_flow_in <= cap_limit + over_cap
                 over_cap = solver.NumVar(0, solver.infinity(), f"over_cap_{p['id']}_{m.replace(' ', '_')}")
-                solver.Add(effective_flow_in - over_cap <= demand_dict[m])
-                slack_vars.append(over_cap * 1000000.0)
+                solver.Add(effective_flow_in - over_cap <= cap_limit)
+                slack_vars.append(over_cap * 1000.0)
             else:
-                outflow_milk_equivalent = []
-                for g in geographies:
-                    g_products = g.get('products', [])
-                    if not g_products and 'product_type' in g:
-                        g_products = [{'type': g['product_type'], 'demand': g.get('demand', 0), 'price': g.get('price', 0)}]
-                    
-                    common_types = set(p_yields.keys()).intersection(set(prod['type'] for prod in g_products if 'type' in prod))
-                    for ptype in common_types:
-                        if get_milk_type_for_product(ptype) == m:
-                            yf = p_yields[ptype]
-                            if yf <= 0:
-                                yf = 1.0
-                            if (p['id'], g['id'], ptype) in flow_p_g:
-                                outflow_milk_equivalent.append(flow_p_g[(p['id'], g['id'], ptype)] * (1.0 / yf))
-                
-                solver.Add(effective_flow_in == sum(outflow_milk_equivalent))
-                
-                cap_limit = capacity_dict.get(m, 0)
-                if cap_limit > 0:
-                    # Soft capacity limit: effective_flow_in <= cap_limit + over_cap
-                    over_cap = solver.NumVar(0, solver.infinity(), f"over_cap_{p['id']}_{m.replace(' ', '_')}")
-                    solver.Add(effective_flow_in - over_cap <= cap_limit)
-                    slack_vars.append(over_cap * 1000000.0)
-                else:
-                    solver.Add(effective_flow_in == 0)
+                solver.Add(effective_flow_in == 0)
 
         # Ensure plant is fulfilled at least 20 percent of its capacity
         total_capacity = sum(capacity_dict.values()) if capacity_dict else p.get('capacity', 0)
@@ -1533,46 +1033,15 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
             if inflow_vars:
                 plant_slack = solver.NumVar(0, solver.infinity(), f"slack_plant_{p['id']}")
                 solver.Add(sum(inflow_vars) + plant_slack >= 0.20 * total_capacity)
-                slack_vars.append(plant_slack * 10000000.0)
+                slack_vars.append(plant_slack * 1000.0)
 
-    # 3. Geography demand limit (in product units, per product)
-    for g in geographies:
-        g_products = g.get('products', [])
-        if not g_products and 'product_type' in g:
-            g_products = [{'type': g['product_type'], 'demand': g.get('demand', 0), 'price': g.get('price', 0)}]
-        
-        for g_prod in g_products:
-            ptype = g_prod.get('type')
-            if not ptype:
-                continue
-            demand_val = g_prod.get('demand', 0)
-            
-            flows_for_prod = []
-            for p in plants:
-                if (p['id'], g['id'], ptype) in flow_p_g:
-                    flows_for_prod.append(flow_p_g[(p['id'], g['id'], ptype)])
-            
-            if flows_for_prod:
-                over_geo = solver.NumVar(0, solver.infinity(), f"over_geo_{g['id']}_{ptype.replace(' ', '_')}")
-                solver.Add(sum(flows_for_prod) - over_geo <= demand_val)
-                slack_vars.append(over_geo * 1000000.0)
 
     # Objective: Maximize Profit
     # Profit = Revenue - Transport Cost - Processing/Handling Cost
 
     # 1. Revenue
     revenue_items = []
-    for g in geographies:
-        g_products = g.get('products', [])
-        if not g_products and 'product_type' in g:
-            g_products = [{'type': g['product_type'], 'demand': g.get('demand', 0), 'price': g.get('price', 0)}]
-        g_prices = {prod['type']: prod.get('price', 0.0) for prod in g_products if 'type' in prod}
-        
-        for p in plants:
-            for ptype, price in g_prices.items():
-                if (p['id'], g['id'], ptype) in flow_p_g:
-                    revenue_items.append(flow_p_g[(p['id'], g['id'], ptype)] * price)
-                    
+
     for p in plants:
         p_demands = p.get('demands', [])
         for d in p_demands:
@@ -1599,24 +1068,16 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
         m_lower = str(m).lower()
         bonus = 0.0
         if 'buffalo' in m_lower or 'bm' in m_lower:
-            bonus = 0.003
+            bonus = transport_cost_per_km * 0.6  # Equivalent to 0.003 when cost is 0.005
         elif 'fcm' in m_lower:
-            bonus = 0.002
+            bonus = transport_cost_per_km * 0.4  # Equivalent to 0.002 when cost is 0.005
         elif 'mm' in m_lower:
-            bonus = 0.001
+            bonus = transport_cost_per_km * 0.2  # Equivalent to 0.001 when cost is 0.005
             
         cost_per_unit -= bonus
             
         trans_cost_expr.append(flow_var * cost_per_unit)
-    # Plant -> Geography (Cost scales with actual finished product units shipped)
-    for (p_id, g_id, ptype), flow_var in flow_p_g.items():
-        p_node = next(x for x in plants if x['id'] == p_id)
-        g_node = next(x for x in geographies if x['id'] == g_id)
-        dist = get_pair_dist(p_node, g_node)
-        # Use actual distance to favor nearest plant
-        effective_dist = dist
-        cost_per_unit = effective_dist * transport_cost_per_km
-        trans_cost_expr.append(flow_var * cost_per_unit)
+
 
     # 3. Processing/Handling Costs at Hubs and Plants
     proc_cost_expr = []
@@ -1625,6 +1086,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
         if not h_prods and 'capacity' in h:
             h_prods = [{'type': 'Cow Milk', 'capacity': h['capacity'], 'processing_cost': h.get('processing_cost', 0)}]
         cost_dict = {p['type']: p.get('processing_cost', 0.0) for p in h_prods if 'type' in p}
+        dev_vars = []
         for m in milk_types:
             flow_out_m = sum(flow_h_p[(h['id'], p['id'], m)] for p in plants if (h['id'], p['id'], m) in flow_h_p)
             proc_cost_expr.append(flow_out_m * cost_dict.get(m, 0.0))
@@ -1641,15 +1103,94 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                     {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)}
                 ]
         cost_dict = {m['type']: m.get('processing_cost', 0.0) for m in inflow_milks if 'type' in m}
+        dev_vars = []
         for m in milk_types:
             flow_in_m = sum(flow_h_p[(h['id'], p['id'], m)] for h in hubs if (h['id'], p['id'], m) in flow_h_p)
             proc_cost_expr.append(flow_in_m * cost_dict.get(m, 0.40))
-
-    solver.Maximize(revenue_expr - sum(trans_cost_expr) - sum(proc_cost_expr) - sum(slack_vars))
-
+    # Stage 1: Distance and Profit Optimization
+    slack_total = solver.NumVar(0, solver.infinity(), 'slack_total')
+    solver.Add(slack_total == sum(slack_vars))
+    
+    trans_total = solver.NumVar(0, solver.infinity(), 'trans_total')
+    solver.Add(trans_total == sum(trans_cost_expr))
+    
+    rev_total = solver.NumVar(-solver.infinity(), solver.infinity(), 'rev_total')
+    solver.Add(rev_total == revenue_expr)
+    
+    profit_expr = rev_total - trans_total - sum(proc_cost_expr) - slack_total
+    solver.Maximize(profit_expr)
     status = solver.Solve()
 
-
+    if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+        opt_slack = slack_total.solution_value()
+        opt_rev = rev_total.solution_value()
+        opt_trans = trans_total.solution_value()
+        
+        # Stage 2: Fair Rebalancing (Even Distribution)
+        # 1. Lock slack penalties so the solver doesn't drop milk to cheat
+        solver.Add(slack_total <= opt_slack + 0.1)
+        # 2. Lock revenue so we don't lose sales
+        solver.Add(rev_total >= opt_rev - 0.1)
+        # 3. Add Tolerance Budget for Transport: Allow up to MAX_DISTANCE_LIMIT implications
+        # By giving transport a massive generous budget (or not locking it), the solver is free 
+        # to route milk to ANY valid mapped plant within MAX_DISTANCE_LIMIT to achieve Even Distribution.
+        solver.Add(trans_total <= opt_trans + (opt_trans * 5.0) + 50000.0) # 500% tolerance budget!
+        
+        dev_vars = []
+        for m in milk_types:
+            target_F_m = solver.NumVar(0, solver.infinity(), f'target_F_{m.replace(" ", "_")}')
+            max_dev_m = solver.NumVar(0, solver.infinity(), f'max_dev_{m.replace(" ", "_")}')
+            has_plants_for_m = False
+            
+            m_lower = str(m).lower()
+            
+            for p in plants:
+                inflows = [flow_h_p[(h['id'], p['id'], m)] for h in hubs if (h['id'], p['id'], m) in flow_h_p]
+                if not inflows: continue
+                total_inflow = sum(inflows)
+                
+                # Determine capacity for this specific commodity
+                cap = 0
+                p_demands = p.get('demands', [])
+                if p_demands:
+                    demand_dict = {d['type']: d.get('demand', 0) for d in p_demands if 'type' in d}
+                    if m in demand_dict:
+                        cap = demand_dict[m]
+                    elif 'cow' in m_lower or 'cm' in m_lower:
+                        demand_keys = [k for k in demand_dict.keys() if 'cow' in k.lower() or 'cm' in k.lower()]
+                        if demand_keys: cap = sum(demand_dict[k] for k in demand_keys)
+                    elif 'buffalo' in m_lower or 'bm' in m_lower:
+                        demand_keys = [k for k in demand_dict.keys() if 'buffalo' in k.lower() or 'bm' in k.lower()]
+                        if demand_keys: cap = sum(demand_dict[k] for k in demand_keys)
+                else:
+                    inflow_milks = p.get('inflow_milks', [])
+                    if inflow_milks:
+                        capacity_dict = {im['type']: im.get('capacity', 0) for im in inflow_milks if 'type' in im}
+                        if m in capacity_dict:
+                            cap = capacity_dict[m]
+                    else:
+                        cap = p.get('capacity', 0)
+                
+                if cap <= 0: continue
+                has_plants_for_m = True
+                
+                F_p = total_inflow * (1000.0 / cap)
+                
+                dev = solver.NumVar(0, solver.infinity(), f"dev_P_{p['id']}_{m.replace(' ', '_')}")
+                solver.Add(dev >= F_p - target_F_m)
+                solver.Add(dev >= target_F_m - F_p)
+                
+                # Min-max formulation: max_dev must be >= every plant's deviation for this commodity
+                solver.Add(max_dev_m >= dev)
+                
+            if has_plants_for_m:
+                dev_vars.append(max_dev_m)
+                
+        if dev_vars:
+            # Minimize deviation as primary goal, but also minimize transport cost as a secondary goal
+            # This ensures that even when perfectly balanced, the solver strictly prefers the nearest plants
+            solver.Maximize(-sum(dev_vars) * 1000000.0 - trans_total)
+            status = solver.Solve()
 
     if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
         routes = []
@@ -1661,7 +1202,7 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                 h_node = next(x for x in hubs if x['id'] == h_id)
                 p_node = next(x for x in plants if x['id'] == p_id)
                 dist = get_pair_dist(h_node, p_node)
-                cost = dist * transport_cost_per_km * val
+                cost = dist * transport_cost_per_km
                 clean_m = m.replace(' ', '_').replace('-', '_')
                 
                 # Calculate optimal vehicles
@@ -1673,7 +1214,11 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                 total_cap = sum(count * global_caps.get(v, 0) for v, count in optimal_veh.items())
                 excess = total_cap - val if total_veh > 0 else 0.0
                 
-                routes.append({
+                # Calculate trip-based cost
+                vehicle_rates = {'V07': 38, 'V10': 42, 'V12': 46, 'V15': 52, 'V20': 60, 'V25': 68, 'V30': 75, 'V35': 85}
+                cost = sum(trips * dist * vehicle_rates.get(v_type, 0) for v_type, trips in optimal_veh.items())
+                
+                route_dict = {
                     'id': f"route_{h_id}_{p_id}_{clean_m}",
                     'from_id': h_id,
                     'to_id': p_id,
@@ -1687,40 +1232,16 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                     'total_vehicles': total_veh,
                     'total_vehicle_capacity': total_cap,
                     'excess_vehicle_capacity': round(excess, 2)
-                })
+                }
+                for v_type, trips in optimal_veh.items():
+                    route_dict[f'vehicles_{v_type}'] = trips
+                routes.append(route_dict)
 
-        # Extract Plant -> Geography flows
-        for (p_id, g_id, ptype), flow_var in flow_p_g.items():
-            val = flow_var.solution_value()
-            if val > 0.1:
-                p_node = next(x for x in plants if x['id'] == p_id)
-                g_node = next(x for x in geographies if x['id'] == g_id)
-                dist = get_pair_dist(p_node, g_node)
-                cost = dist * transport_cost_per_km * val
-                unit = 'kg' if any(k in ptype.strip().lower() for k in ['cheese', 'khoya', 'butter', 'milk powder']) else 'L'
-                routes.append({
-                    'id': f"route_{p_id}_{g_id}_{ptype.replace(' ', '_')}",
-                    'from_id': p_id,
-                    'to_id': g_id,
-                    'from_type': 'plant',
-                    'to_type': 'geography',
-                    'flow': round(val, 2),
-                    'product_type': ptype,
-                    'unit': unit,
-                    'distance': round(dist, 2),
-                    'cost': round(cost, 2)
-                })
 
         # Aggregate metrics
         obj_val = solver.Objective().Value()
         
-        total_revenue = sum(
-            flow_var.solution_value() * next(
-                (prod.get('price', 0.0) for prod in next(g for g in geographies if g['id'] == g_id).get('products', []) if prod.get('type') == ptype),
-                next(g for g in geographies if g['id'] == g_id).get('price', 0.0)
-            )
-            for (p_id, g_id, ptype), flow_var in flow_p_g.items() if flow_var.solution_value() > 0.1
-        )
+        total_revenue = 0.0
 
         for p in plants:
             p_demands = p.get('demands', [])
@@ -1739,7 +1260,8 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
             if not h_prods and 'capacity' in h:
                 h_prods = [{'type': 'Cow Milk', 'capacity': h['capacity'], 'processing_cost': h.get('processing_cost', 0)}]
             cost_dict = {p['type']: p.get('processing_cost', 0.0) for p in h_prods if 'type' in p}
-            for m in milk_types:
+            dev_vars = []
+        for m in milk_types:
                 flow_out_m = sum(flow_h_p[(h['id'], p['id'], m)].solution_value() for p in plants if (h['id'], p['id'], m) in flow_h_p)
                 total_hub_proc_cost += flow_out_m * cost_dict.get(m, 0.0)
 
@@ -1756,7 +1278,8 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
                         {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)}
                     ]
             cost_dict = {m['type']: m.get('processing_cost', 0.0) for m in inflow_milks if 'type' in m}
-            for m in milk_types:
+            dev_vars = []
+        for m in milk_types:
                 flow_in_m = sum(flow_h_p[(h['id'], p['id'], m)].solution_value() for h in hubs if (h['id'], p['id'], m) in flow_h_p)
                 total_plant_proc_cost += flow_in_m * cost_dict.get(m, 0.40)
 
@@ -1773,45 +1296,12 @@ def solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km=0
         for p in plants:
             in_val = sum(flow_h_p[(h['id'], p['id'], m)].solution_value() for h in hubs for m in milk_types if (h['id'], p['id'], m) in flow_h_p)
             
-            p_demands = p.get('demands', [])
-            if p_demands:
-                outflow_milk = in_val
-            else:
-                outflow_milk = 0.0
-                p_products = p.get('products', [])
-                if not p_products and 'production_type' in p:
-                    p_products = [{'type': p['production_type'], 'yield': get_yield_factor(p['production_type'])}]
-                p_yields = {prod['type']: prod.get('yield', 1.0) for prod in p_products if 'type' in prod}
-                
-                for (p_id, g_id, ptype), flow_var in flow_p_g.items():
-                    if p_id == p['id']:
-                        yf = p_yields.get(ptype, 1.0)
-                        if yf <= 0:
-                            yf = 1.0
-                        outflow_milk += flow_var.solution_value() / yf
+            outflow_milk = in_val
 
             node_metrics[p['id']] = {
                 'inflow': round(in_val, 2),
                 'outflow': round(outflow_milk, 2)
             }
-        for g in geographies:
-            inflow_milk = 0.0
-            for (p_id, g_id, ptype), flow_var in flow_p_g.items():
-                if g_id == g['id']:
-                    p_node = next(x for x in plants if x['id'] == p_id)
-                    p_products = p_node.get('products', [])
-                    if not p_products and 'production_type' in p_node:
-                        p_products = [{'type': p_node['production_type'], 'yield': get_yield_factor(p_node['production_type'])}]
-                    yf = next((prod.get('yield', 1.0) for prod in p_products if prod.get('type') == ptype), 1.0)
-                    if yf <= 0:
-                        yf = 1.0
-                    inflow_milk += flow_var.solution_value() / yf
-
-            node_metrics[g['id']] = {
-                'inflow': round(inflow_milk, 2),
-                'outflow': 0.0
-            }
-
         return {
             'status': 'OPTIMAL',
             'summary': {
@@ -1839,13 +1329,11 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
     start_time = time.time()
     
     try:
-        farmers = [n for n in nodes if n['type'] == 'farmer']
         hubs = [n for n in nodes if n['type'] == 'hub']
         plants = [n for n in nodes if n['type'] == 'plant']
-        geographies = [n for n in nodes if n['type'] == 'geography']
         
         # Run solver helper
-        res = solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km, excel_file_path)
+        res = solve_network_lp(hubs, plants, transport_cost_per_km, excel_file_path)
         
         if res.get('status') in ('OPTIMAL', 'FEASIBLE'):
             vehicle_limits_map = parse_bmc_vehicles(excel_file_path)
@@ -1924,7 +1412,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 bmc_info = vehicle_limits_map.get(supplier, {})
                 margin_low = bmc_info.get('margin_low', 5.0) if isinstance(bmc_info, dict) else 5.0
                 margin_high = bmc_info.get('margin_high', 5.0) if isinstance(bmc_info, dict) else 5.0
-                strategy = bmc_info.get('strategy', 'Whole Milk Supply') if isinstance(bmc_info, dict) else 'Whole Milk Supply'
+                strategy = bmc_info.get('strategy', 'Least Vehicle Strategy') if isinstance(bmc_info, dict) else 'Least Vehicle Strategy'
                 
                 # Margins for output columns
                 r['margin_low'] = margin_low
@@ -1969,7 +1457,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 # Determine last allocated vehicle (smallest capacity utilized)
                 lq_val = None
                 if optimal_veh:
-                    global_caps = vehicle_limits_map.get('global_caps', {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0})
+                    global_caps = vehicle_limits_map.get('global_caps', {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0})
                     smallest_cap = min((global_caps.get(k, 0) for k, v in optimal_veh.items() if v > 0), default=None)
                     if smallest_cap:
                         lq_val = 0.15 * smallest_cap
@@ -1978,11 +1466,11 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     do_not_supply = True
                     reason_override = "No vehicles available in the sub-cluster pool"
 
-                elif lq_val is not None and excess_qty > lq_val:
+                elif lq_val is not None and excess_qty > lq_val and str(strategy).strip().lower() != 'least vehicle strategy':
                     # The last (partial) vehicle would be too empty → switch to round-DOWN.
                     # Round-down: maximise total capacity WITHOUT exceeding flow.
                     # Result: every vehicle runs fully loaded (empty = 0 ≤ lq_val).
-                    rd_veh = get_vehicles_round_down(q, limits, caps=vehicle_limits_map.get('global_caps'))
+                    rd_veh = get_vehicles_round_down(q, limits, caps=vehicle_limits_map.get('global_caps'), strategy=strategy)
                     global_caps = vehicle_limits_map.get('global_caps', {})
                     rd_total_veh = sum(rd_veh.values())
                     rd_total_cap = sum(count * global_caps.get(v, 0) for v, count in rd_veh.items())
@@ -2099,10 +1587,8 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             for n in nodes:
                 nid = n['id']
                 ntype = n['type']
-                
-                if ntype == 'farmer':
-                    continue
-                elif ntype == 'hub':
+
+                if ntype == 'hub':
                     for p in n.get('products', []):
                         comm = p['type']
                         limit = p.get('capacity', 0.0)
@@ -2174,24 +1660,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                                 'Outflow Throughput': round(outflow, 2),
                                 'Capacity / Supply Limit': limit,
                                                             })
-                elif ntype == 'geography':
-                    for p in n.get('products', []):
-                        comm = p['type']
-                        limit = p.get('demand', 0.0)
-                        inflow = inflow_lookup.get((nid, comm), 0.0)
-                        outflow = outflow_lookup.get((nid, comm), 0.0)
-                        nodes_data.append({
-                            'Node ID': nid,
-                            'Name': n['name'],
-                            'Type': ntype,
-                            'Subtype': n.get('subtype', ''),
-                            'Latitude': n['lat'],
-                            'Longitude': n['lng'],
-                            'Commodity': comm,
-                            'Inflow Throughput': round(inflow, 2),
-                            'Outflow Throughput': round(outflow, 2),
-                            'Capacity / Supply Limit': limit,
-                                                    })
+
             df_nodes = pd.DataFrame(nodes_data)
             
             # Calculate plant-level substitution values from the solver
@@ -2298,12 +1767,13 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         'Transport Cost (₹)': r['cost'],
                         'Status': 'ACTIVE',
                         'Reason': 'Optimal Flow',
+                        'Detailed Reason': f'Optimized for minimal transport cost (Dist: {r["distance"]} km) and even percentage balancing.' if r['from_type'] == 'hub' else f'Optimized to fulfill {ptype} market demand (Dist: {r["distance"]} km).',
                         **{f'{vc} Vehicles': r.get(f'vehicles_{vc}', 0) for vc in vehicle_limits_map.get('global_caps', {}).keys()},
                         'Total Vehicles': r.get('vehicles_total', 0) if 'vehicles_total' in r else r.get('total_vehicles', 0),
                         'Total Vehicle Capacity (L)': r.get('capacity_total', 0) if 'capacity_total' in r else r.get('total_vehicle_capacity', 0),
                         'Excess Vehicle Capacity (L)': r.get('capacity_excess', 0) if 'capacity_excess' in r else r.get('excess_vehicle_capacity', 0),
                         'VehicleReason': r.get('vehicle_reason', 'Optimal'),
-                                                'SupplierCluster': cluster,
+                        'SupplierCluster': cluster,
                         'SupplierSubCluster': subcluster,
                         'Strategy': strategy,
                         'FlowLowMarginPercentage': bmc_info.get('margin_low', 0.0) if isinstance(bmc_info, dict) else 5.0,
@@ -2334,12 +1804,13 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         'Transport Cost (₹)': 0.0,
                         'Status': 'ACTIVE',
                         'Reason': ext_reason,
+                        'Detailed Reason': 'Substituted internally at plant to fulfill commodity deficit while minimizing external transport cost.',
                         **{f'{vc} Vehicles': 0 for vc in vehicle_limits_map.get('global_caps', {}).keys()},
                         'Total Vehicles': 0,
                         'Total Vehicle Capacity (L)': 0,
                         'Excess Vehicle Capacity (L)': 0,
                         'VehicleReason': 'Substituted Flow',
-                                                'SupplierCluster': cluster,
+                        'SupplierCluster': cluster,
                         'SupplierSubCluster': subcluster,
                         'Strategy': strategy,
                         'FlowLowMarginPercentage': 0.0,
@@ -2376,14 +1847,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         if 'type' in m:
                             plant_capacities[(p['id'], m['type'])] = m.get('capacity', 0.0)
 
-            geo_demands = {}
-            for g in geographies:
-                g_products = g.get('products', [])
-                if not g_products and 'product_type' in g:
-                    g_products = [{'type': g['product_type'], 'demand': g.get('demand', 0)}]
-                for prod in g_products:
-                    if 'type' in prod:
-                        geo_demands[(g['id'], prod['type'])] = prod.get('demand', 0.0)
+
 
             # 3.1. Generate Unused Routes: Hub -> Plant
             for h in hubs:
@@ -2414,7 +1878,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                                 pair_key = tuple(sorted([h['id'], plant['id']]))
                                 dist = _distance_cache.get(pair_key)
                                 if dist is None:
-                                    dist = calculate_haversine_distance(h, plant)
+                                    dist = 9999.0
                                     
                                 if dist > MAX_DISTANCE_LIMIT:
                                     reason = f"Distance exceeds {int(MAX_DISTANCE_LIMIT)} km"
@@ -2426,8 +1890,10 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                                     reason = "BMC capacity is fully utilized by other Plants"
                                 elif abs(total_p_in - plant_cap) < 0.1:
                                     reason = "Plant capacity/demand is fully utilized by other BMCs"
-                                else:
+                                elif (str(h['id']), str(plant['id']), str(m)) not in valid_route_tuples:
                                     reason = "Mapping not exists."
+                                else:
+                                    reason = "Not selected by optimizer (sub-optimal route)."
                                 routes_data.append({
                                     'Route ID': f"route_{h['id']}_{plant['id']}_{m.replace(' ', '_')}",
                                     'From Node ID': h['id'],
@@ -2447,6 +1913,8 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                                     'Transport Cost (₹)': 0.0,
                                     'Status': 'UNUSED',
                                     'Reason': reason,
+                                    'Detailed Reason': reason,
+                                    **{f'{vc} Vehicles': 0 for vc in vehicle_limits_map.get('global_caps', {}).keys()},
                                     'Total Vehicles': 0,
                                     'Total Vehicle Capacity (L)': 0,
                                     'Excess Vehicle Capacity (L)': 0,
@@ -2461,78 +1929,6 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                                     'Mapping Exists': 'Yes' if (str(h['id']), str(plant['id']), str(m)) in valid_route_tuples else 'No'
                                 })
 
-            # 3.2. Generate Unused Routes: Plant -> Geography
-            if geographies:
-                for plant in plants:
-                    p_products = plant.get('products', [])
-                    if not p_products and 'production_type' in plant:
-                        p_products = [{'type': plant['production_type']}]
-                    for p in p_products:
-                        ptype = p.get('type')
-                        if not ptype:
-                            continue
-                        raw_milk = get_milk_type_for_product(ptype)
-                        for g in geographies:
-                            g_products = g.get('products', [])
-                            if not g_products and 'product_type' in g:
-                                g_products = [{'type': g['product_type']}]
-                            g_types = {gp['type'] for gp in g_products if 'type' in gp}
-                            
-                            if ptype in g_types:
-                                key = (plant['id'], g['id'], ptype)
-                                if key not in active_keys:
-                                    total_p_in = inflow_lookup.get((plant['id'], raw_milk), 0.0)
-                                    total_g_in = inflow_lookup.get((g['id'], ptype), 0.0)
-                                    g_demand = geo_demands.get((g['id'], ptype), 0.0)
-                                    
-                                    pair_key = tuple(sorted([plant['id'], g['id']]))
-                                    dist = _distance_cache.get(pair_key)
-                                    if dist is None:
-                                        dist = calculate_haversine_distance(plant, g)
-                                        
-                                    if dist > MAX_DISTANCE_LIMIT:
-                                        reason = f"Distance exceeds {int(MAX_DISTANCE_LIMIT)} km"
-                                    elif total_p_in == 0:
-                                        reason = "Plant has no raw milk inflow to process"
-                                    elif g_demand <= 0:
-                                        reason = "Market demand for this product is zero"
-                                    elif abs(total_g_in - g_demand) < 0.1:
-                                        reason = "Market demand is fully satisfied by other Plants"
-                                    else:
-                                        reason = "Mapping not exists."
-                                    unit = 'kg' if any(k in ptype.lower() for k in ['cheese', 'khoya', 'butter', 'milk powder']) else 'L'
-                                    routes_data.append({
-                                        'Route ID': f"route_{plant['id']}_{g['id']}_{ptype.replace(' ', '_')}",
-                                        'From Node ID': plant['id'],
-                                        'From Name': plant.get('name', 'Unknown'),
-                                        'From Type': 'plant',
-                                        'From Latitude': plant.get('lat'),
-                                        'From Longitude': plant.get('lng'),
-                                        'To Node ID': g['id'],
-                                        'To Name': g.get('name', 'Unknown'),
-                                        'To Type': 'geography',
-                                        'To Latitude': g.get('lat'),
-                                        'To Longitude': g.get('lng'),
-                                        'Product / Milk Type': ptype,
-                                        'Flow': 0.0,
-                                        'Unit': unit,
-                                        'Distance (km)': round(dist, 2),
-                                        'Transport Cost (₹)': 0.0,
-                                        'Status': 'UNUSED',
-                                        'Reason': reason,
-                                        'Total Vehicles': 0,
-                                        'Total Vehicle Capacity (L)': 0,
-                                        'Excess Vehicle Capacity (L)': 0,
-                                        'VehicleReason': 'N/A',
-                                                                                'SupplierCluster': '',
-                                        'SupplierSubCluster': '',
-                                        'Strategy': '',
-                                        'FlowLowMarginPercentage': 0.0,
-                                        'FlowHighMarginPercentage': 0.0,
-                                        'MinimumFlowQuantity': 0.0,
-                                        'MaximumFlowQuantity': 0.0,
-                                        'Mapping Exists': 'Yes' if (str(plant['id']), str(g['id']), str(ptype)) in valid_route_tuples else 'No'
-                                    })
 
             df_routes = pd.DataFrame(routes_data)
             
@@ -2547,6 +1943,21 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             for _, r in df_hub_to_plant.iterrows():
                 unique_comms_set.add(r['Product / Milk Type'])
             unique_commodities = sorted(list(unique_comms_set))
+            # Group unique_commodities into base and conversions
+            base_comms = [c for c in unique_commodities if ' to ' not in c]
+            conv_comms = [c for c in unique_commodities if ' to ' in c]
+            
+            target_to_convs = {}
+            for c in conv_comms:
+                target = c.split(' to ')[1].strip()
+                if target not in target_to_convs:
+                    target_to_convs[target] = []
+                target_to_convs[target].append(c)
+                
+            for target in target_to_convs:
+                if target not in base_comms:
+                    base_comms.append(target)
+            base_comms.sort()
             
             plant_report_rows = []
             for p in plants:
@@ -2571,23 +1982,51 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         if 'type' in m:
                             plant_demands[m['type']] = m.get('capacity', 0.0)
                 
-                for comm in unique_commodities:
-                    demand = plant_demands.get(comm, 0.0)
-                    supply = plant_supplies.get(comm, 0.0)
+                for B in base_comms:
+                    demand = plant_demands.get(B, 0.0)
+                    supply = plant_supplies.get(B, 0.0)
                     if demand == 0:
                         pct = ""
                     else:
                         pct = round((supply / demand * 100.0), 2)
                     
-                    row_dict[f'{comm} {{Demand}}'] = demand
-                    row_dict[f'{comm} {{Supply}}'] = supply
-                    row_dict[f'{comm} {{Received Percentage}}'] = pct
+                    row_dict[f'{B} {{Demand}}'] = demand
+                    row_dict[f'{B} {{Supply}}'] = supply
+                    
+                    has_conv = B in target_to_convs
+                    if not has_conv:
+                        row_dict[f'{B} {{Received Percentage}}'] = pct
+                    
+                    final_supply = supply
+                    if has_conv:
+                        for C in target_to_convs[B]:
+                            c_supply = plant_supplies.get(C, 0.0)
+                            row_dict[f'{C} {{Supply}}'] = c_supply
+                            final_supply += c_supply
+                            
+                        row_dict[f'Final {B} Supply'] = round(final_supply, 2)
+                        final_pct = round((final_supply / demand * 100.0), 2) if demand > 0 else ""
+                        row_dict[f'Final {B} Percentage'] = final_pct
+                        
                 plant_report_rows.append(row_dict)
             df_plant_report = pd.DataFrame(plant_report_rows)
             if df_plant_report.empty:
                 df_plant_report = pd.DataFrame(columns=['Plant ID', 'Plant Name'])
             
             # --- 2. BMC Supply Report ---
+            bmc_base_comms = [c for c in unique_commodities if ' to ' not in c]
+            source_to_convs = {}
+            for c in conv_comms:
+                src = c.split(' to ')[0].strip()
+                if src not in source_to_convs:
+                    source_to_convs[src] = []
+                source_to_convs[src].append(c)
+                
+            for src in source_to_convs:
+                if src not in bmc_base_comms:
+                    bmc_base_comms.append(src)
+            bmc_base_comms.sort()
+            
             hub_report_rows = []
             for h in hubs:
                 supplier = bmc_to_supplier.get(h['id'], '')
@@ -2610,17 +2049,31 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     if p_item.get('type'):
                         hub_stocks[p_item['type']] = p_item.get('capacity', 0.0)
                         
-                for comm in unique_commodities:
-                    stock = hub_stocks.get(comm, 0.0)
-                    supply = hub_supplies.get(comm, 0.0)
+                for B in bmc_base_comms:
+                    stock = hub_stocks.get(B, 0.0)
+                    supply = hub_supplies.get(B, 0.0)
                     if stock == 0:
                         pct = ""
                     else:
                         pct = round((supply / stock * 100.0), 2)
                         
-                    row_dict[f'{comm} {{Stock}}'] = stock
-                    row_dict[f'{comm} {{Supply}}'] = supply
-                    row_dict[f'{comm} {{Supply Percentage}}'] = pct
+                    row_dict[f'{B} {{Stock}}'] = stock
+                    row_dict[f'{B} {{Supply}}'] = supply
+                    
+                    has_conv = B in source_to_convs
+                    if not has_conv:
+                        row_dict[f'{B} {{Supply Percentage}}'] = pct
+                        
+                    final_supply = supply
+                    if has_conv:
+                        for C in source_to_convs[B]:
+                            c_supply = hub_supplies.get(C, 0.0)
+                            row_dict[f'{C} {{Supply}}'] = c_supply
+                            final_supply += c_supply
+                            
+                        row_dict[f'Final {B} Supply'] = round(final_supply, 2)
+                        final_pct = round((final_supply / stock * 100.0), 2) if stock > 0 else ""
+                        row_dict[f'Final {B} Percentage'] = final_pct
                 hub_report_rows.append(row_dict)
             df_hub_report = pd.DataFrame(hub_report_rows)
             if df_hub_report.empty:
@@ -2659,13 +2112,16 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         
                 for m in sorted(list(hub_commodities)):
                     total_flow = sum(flow_map.get((h['id'], p['id'], m), 0.0) for p in plants)
+                    if round(total_flow, 2) == 0:
+                        continue
+                        
                     supplier = bmc_to_supplier.get(h['id'], '')
                     bmc_info = vehicle_limits_map.get(supplier, {})
                     lq = bmc_info.get('leave_quantity', 0.0) if isinstance(bmc_info, dict) else 0.0
                     row_dict = {
                         'BMC': h.get('name', h['id']),
                         'Product': m,
-                                                'Quantity': round(total_flow, 2)
+                        'Quantity': round(total_flow, 2)
                     }
                     for p in plants:
                         p_name = p.get('name', p['id'])
@@ -2738,8 +2194,29 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             else:
                 df_plant_wise_alloc = pd.DataFrame(columns=['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + bmc_names_list)
             
+            # Calculate KPIs
+            try:
+                total_flow = df_hub_to_plant['Flow'].sum() if not df_hub_to_plant.empty else 0.0
+                total_vehicles = df_hub_to_plant['Total Vehicles'].sum() if not df_hub_to_plant.empty else 0
+                total_driven_km = (df_hub_to_plant['Distance (km)'] * df_hub_to_plant['Total Vehicles']).sum() if not df_hub_to_plant.empty else 0.0
+
+                trips_per_1m = (total_vehicles / total_flow) * 1000000 if total_flow > 0 else 0.0
+                avg_l_per_trip = (total_flow / total_vehicles) if total_vehicles > 0 else 0.0
+                km_per_1000l = (total_driven_km / total_flow) * 1000 if total_flow > 0 else 0.0
+
+                df_kpi = pd.DataFrame([{
+                    'Trips': int(total_vehicles),
+                    'Trips/1M L': round(trips_per_1m, 2),
+                    'Avg L/trip': round(avg_l_per_trip, 2),
+                    'KM/1000 L': round(km_per_1000l, 2)
+                }])
+            except Exception as e:
+                print("Error calculating KPIs:", e)
+                df_kpi = pd.DataFrame([{'Trips': 0, 'Trips/1M L': 0, 'Avg L/trip': 0, 'KM/1000 L': 0}])
+
             # Save sheets
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df_kpi.to_excel(writer, sheet_name='KPI Summary', index=False)
                 df_summary.to_excel(writer, sheet_name='Summary', index=False)
                 df_nodes.to_excel(writer, sheet_name='Nodes', index=False)
                 df_routes.to_excel(writer, sheet_name='Routes', index=False)
@@ -2769,6 +2246,97 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 })
                 df_veh_alloc.to_excel(writer, sheet_name='BMC Vehicle Allocation', index=False)
                 
+                # --- New Supplier Report ---
+                dispatch_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'cases', 'Summarized_Dispatch_Details.xlsx')
+                df_dispatch = pd.DataFrame()
+                if os.path.exists(dispatch_file_path):
+                    try:
+                        df_dispatch = pd.read_excel(dispatch_file_path)
+                        # Ensure columns are strings for matching
+                        if 'Supplier' in df_dispatch.columns:
+                            df_dispatch['Supplier'] = df_dispatch['Supplier'].astype(str).str.replace(r'\.0$', '', regex=True)
+                        if 'Supplier Code' in df_dispatch.columns:
+                            df_dispatch['Supplier Code'] = df_dispatch['Supplier Code'].astype(str).str.replace(r'\.0$', '', regex=True)
+                        if 'BMC Code' in df_dispatch.columns:
+                            df_dispatch['BMC Code'] = df_dispatch['BMC Code'].astype(str).str.replace(r'\.0$', '', regex=True)
+                    except Exception as e:
+                        print("Error reading Summarized_Dispatch_Details:", e)
+
+                bmc_to_sup_code = {}
+                bmc_to_sup_name = {}
+                if excel_file_path and os.path.exists(excel_file_path):
+                    try:
+                        df_dist = pd.read_excel(excel_file_path, sheet_name='Distance')
+                        for _, row in df_dist.iterrows():
+                            bmc_c = str(row.get('BMC Code', '')).strip()
+                            if bmc_c:
+                                bmc_to_sup_code[bmc_c] = str(row.get('Supplier Code', ''))
+                                bmc_to_sup_name[bmc_c] = str(row.get('Supplier', ''))
+                    except Exception as e:
+                        print("Error reading Distance sheet for Supplier Report:", e)
+
+                supplier_report_rows = []
+                for bmc_id, group in df_hub_to_plant.groupby('From Node ID'):
+                    bmc_name = group.iloc[0]['From Name']
+                    total_tankers = group['Total Vehicles'].sum()
+                    total_distance = group['Distance (km)'].sum()
+                    total_supply = group['Flow'].sum()
+                    
+                    veh_counts = {}
+                    for vc in veh_cols:
+                        if vc in group.columns:
+                            veh_counts[vc] = int(group[vc].sum())
+                        else:
+                            veh_counts[vc] = 0
+                            
+                    sup_code = bmc_to_sup_code.get(bmc_id, '')
+                    sup_name = bmc_to_sup_name.get(bmc_id, '')
+                    
+                    # Split MMC Code (bmc_id) to get Supplier Code and BMC Code
+                    extracted_sup_code = ''
+                    extracted_bmc_code = ''
+                    parts = str(bmc_id).split('_')
+                    if len(parts) >= 2:
+                        extracted_sup_code = parts[0].strip()
+                        extracted_bmc_code = parts[1].strip()
+                    else:
+                        extracted_sup_code = str(bmc_id).strip()
+
+                    row_dict = {
+                        'Supplier': sup_name,
+                        'Supplier Code': extracted_sup_code,
+                        'BMC Code': extracted_bmc_code,
+                        'MMC Code': bmc_id,
+                        'MMC Name': bmc_name
+                    }
+                    
+                    # Add individual vehicle columns
+                    for vc in veh_cols:
+                        row_dict[vc] = veh_counts.get(vc, 0)
+                        
+                    row_dict['Total Vehicles'] = total_tankers
+                    row_dict['Total Distance'] = total_distance
+                    row_dict['Total Supply'] = total_supply
+
+                    # Join with df_dispatch
+                    if not df_dispatch.empty and extracted_sup_code and extracted_bmc_code:
+                        sup_col = 'Supplier Code' if 'Supplier Code' in df_dispatch.columns else 'Supplier'
+                        bmc_col = 'BMC Code'
+                        if bmc_col in df_dispatch.columns:
+                            match = df_dispatch[(df_dispatch[sup_col] == extracted_sup_code) & (df_dispatch[bmc_col] == extracted_bmc_code)]
+                            if not match.empty:
+                                match_row = match.iloc[0].to_dict()
+                                for k, v in match_row.items():
+                                    if k not in row_dict:
+                                        row_dict[k] = v
+                                    else:
+                                        row_dict[f'Dispatch_{k}'] = v
+                    
+                    supplier_report_rows.append(row_dict)
+                
+                df_supplier_summary = pd.DataFrame(supplier_report_rows)
+                df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
+                
             update_job_completed(job_id, output_filename, res['summary'])
         else:
             update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")
@@ -2789,10 +2357,9 @@ def optimize_network():
     farmers = data.get('farmers', [])
     hubs = data.get('hubs', [])
     plants = data.get('plants', [])
-    geographies = data.get('geographies', [])
-    transport_cost_per_km = data.get('transport_cost_per_km', 0.02)
+    transport_cost_per_km = data.get('transport_cost_per_km', 0.005)
 
-    res = solve_network_lp(farmers, hubs, plants, geographies, transport_cost_per_km)
+    res = solve_network_lp(hubs, plants, transport_cost_per_km)
     if res.get('status') == 'ERROR':
         return jsonify(res), 500
     return jsonify(res)

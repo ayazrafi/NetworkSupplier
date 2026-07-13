@@ -87,6 +87,14 @@ async def verify_db_records(request_id):
     assert setting["createdOn"] is not None, "createdOn field in settings is missing"
     print("OK: RequestSettings document verified.")
 
+    # 6. Verify RequestPlantSupplierMappings
+    mapping = await db["RequestPlantSupplierMappings"].find_one({"requestId": request_id})
+    assert mapping is not None, "RequestPlantSupplierMappings document not found!"
+    assert mapping["plantCode"] == "P001", f"Unexpected plantCode: {mapping.get('plantCode')}"
+    assert mapping["supplierCode"] == "SUP001", f"Unexpected supplierCode: {mapping.get('supplierCode')}"
+    assert mapping["productCode"] == "MILK", f"Unexpected productCode: {mapping.get('productCode')}"
+    print("OK: RequestPlantSupplierMappings document verified.")
+
     client.close()
 
 def run_tests():
@@ -128,6 +136,13 @@ def run_tests():
                 "supplierCode": "SUP001",
                 "vehicleType": "10L",
                 "count": 8
+            }
+        ],
+        "plantSupplierMapping": [
+            {
+                "plantCode": "P001",
+                "supplierCode": "SUP001",
+                "productCode": "MILK"
             }
         ],
         "maxDistance": 150,

@@ -19,3 +19,7 @@ class RequestVehiclesRepository(BaseRepository):
 class RequestSettingsRepository(BaseRepository):
     def __init__(self):
         super().__init__("RequestSettings")
+
+class RequestPlantSupplierMappingRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("RequestPlantSupplierMappings")
