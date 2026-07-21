@@ -138,6 +138,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static files
+from fastapi.staticfiles import StaticFiles
+os.makedirs("outputs", exist_ok=True)
+app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
+
 # Register Controllers / Routers
 app.include_router(auth.router)
 app.include_router(organization.router)
