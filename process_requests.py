@@ -250,6 +250,30 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         result_doc['plantProduct'] = format_7
         result_doc['supplierProductVehicles'] = format_8
         
+        try:
+            report_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"reports_{request_id}.xlsx")
+            with pd.ExcelWriter(report_path) as writer:
+                wrote_any = False
+                for f_data, s_name in [
+                    (format_1, 'plantSupply'), (format_2, 'supplierProductSupply'),
+                    (format_3, 'supplierVehicles'), (format_4, 'supplierPlantProduct'),
+                    (format_5, 'supplierBmcProduct'), (format_6, 'plantBmcProduct'),
+                    (format_7, 'plantProduct'), (format_8, 'supplierProductVehicles')
+                ]:
+                    if f_data:
+                        df_f = pd.DataFrame(f_data)
+                        for col in df_f.columns:
+                            if df_f[col].apply(lambda x: isinstance(x, (list, dict))).any():
+                                df_f[col] = df_f[col].astype(str)
+                        df_f.to_excel(writer, sheet_name=s_name, index=False)
+                        wrote_any = True
+                if not wrote_any:
+                    pd.DataFrame([{"Message": "No data"}]).to_excel(writer, sheet_name='Empty', index=False)
+            print(f"Saved reports Excel at {report_path}")
+        except Exception as e:
+            print(f"Error saving reports Excel: {e}")
+        
+        
         def sanitize_for_mongo(obj):
             if isinstance(obj, dict):
                 return {str(k): sanitize_for_mongo(v) for k, v in obj.items()}
