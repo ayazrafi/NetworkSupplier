@@ -256,6 +256,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         result_doc['plantBmcProduct'] = format_6
         result_doc['plantProduct'] = format_7
         result_doc['supplierProductVehicles'] = format_8
+        settings_repo = RequestSettingsRepository()
+        setting_doc = await settings_repo.collection.find_one({"requestId": request_id})
+        max_distance = setting_doc.get("maxDistance", 0) if setting_doc else 0
+        result_doc['MAX_DISTANCE'] = max_distance
         
         try:
             report_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"reports_{request_id}.xlsx")
@@ -265,7 +269,8 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     (format_1, 'plantSupply'), (format_2, 'supplierProductSupply'),
                     (format_3, 'supplierVehicles'), (format_4, 'supplierPlantProduct'),
                     (format_5, 'supplierBmcProduct'), (format_6, 'plantBmcProduct'),
-                    (format_7, 'plantProduct'), (format_8, 'supplierProductVehicles')
+                    (format_7, 'plantProduct'), (format_8, 'supplierProductVehicles'),
+                    ([{"MAX_DISTANCE": max_distance}], 'MAX_DISTANCE')
                 ]:
                     if f_data:
                         df_f = pd.DataFrame(f_data)

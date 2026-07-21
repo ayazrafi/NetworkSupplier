@@ -977,6 +977,19 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
 
 # Background thread processor for jobs
 def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, excel_file_path=None):
+    global MAX_DISTANCE_LIMIT
+    MAX_DISTANCE_LIMIT = 800.0  # Reset to default for each job to prevent mixing data between jobs
+    try:
+        from src.config.environment import Environment
+        import pymongo
+        client = pymongo.MongoClient(Environment.MONGO_URI)
+        setting = client[Environment.MONGO_DB]["RequestSettings"].find_one({"requestId": job_id})
+        if setting and "maxDistance" in setting:
+            MAX_DISTANCE_LIMIT = float(setting["maxDistance"])
+        client.close()
+    except Exception as e:
+        print(f"Error fetching MAX_DISTANCE for job {job_id}: {e}")
+
     start_time = time.time()
     
     try:
