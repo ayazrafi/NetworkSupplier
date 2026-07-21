@@ -67,15 +67,16 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         sheet_names = xls.sheet_names
         
         input_xls = pd.ExcelFile(excel_path)
+        input_sheet_names = input_xls.sheet_names
         df_map = pd.read_excel(input_xls, 'Plant_BMC_Mapping')
+        df_input_nodes = pd.read_excel(input_xls, 'Nodes') if 'Nodes' in input_sheet_names else pd.DataFrame()
+        df_input_veh = pd.read_excel(input_xls, 'Vehicle Supplier Allocation') if 'Vehicle Supplier Allocation' in input_sheet_names else pd.DataFrame()
         input_xls.close()
         
         bmc_supp_map = dict(zip(df_map['BMCCode'].astype(str), df_map['Supplier']))
         bmc_supp_code_map = dict(zip(df_map['BMCCode'].astype(str), df_map['SupplierCode']))
         
         df_veh = pd.read_excel(xls, 'BMC Vehicle Allocation') if 'BMC Vehicle Allocation' in sheet_names else pd.DataFrame()
-        df_nodes = pd.read_excel(xls, 'Nodes') if 'Nodes' in sheet_names else pd.DataFrame()
-        df_bmc_supp = pd.read_excel(xls, 'BMC Supply Report') if 'BMC Supply Report' in sheet_names else pd.DataFrame()
         df_routes = pd.read_excel(xls, 'Hub To Plant') if 'Hub To Plant' in sheet_names else pd.DataFrame()
         xls.close()
         
@@ -94,65 +95,71 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             
         # 1. plantcode, plantname, producttype, supply
         format_1 = []
-        if not df_nodes.empty:
-            df_plants = df_nodes[df_nodes['Type'] == 'plant']
+        if not df_input_nodes.empty:
+            df_plants = df_input_nodes[df_input_nodes['type'] == 'plant']
             for _, r in df_plants.iterrows():
-                p_code = str(r.get('Node ID', ''))
+                p_code = str(r.get('node_id', ''))
                 format_1.append({
                     "plantcode": p_code,
-                    "plantname": api_dict.get(p_code, str(r.get('Name', ''))),
-                    "producttype": str(r.get('Commodity', '')),
-                    "supply": float(safe_val(r.get('Inflow Throughput', 0)))
+                    "plantname": api_dict.get(p_code, str(r.get('name', ''))),
+                    "producttype": str(r.get('commodity', '')),
+                    "supply": float(safe_val(r.get('demand', 0)))
                 })
         result_doc['plantSupply'] = format_1
         
         # 2. suppliercode, suppliername, all product name key, Total Supply, BMC: [...]
         format_2 = []
-        if not df_bmc_supp.empty:
-            df_bmc_supp['BMC ID'] = df_bmc_supp['BMC ID'].astype(str)
-            df_bmc_supp['SupplierCode'] = df_bmc_supp['BMC ID'].map(bmc_supp_code_map)
-            df_bmc_supp['SupplierName'] = df_bmc_supp['BMC ID'].map(bmc_supp_map)
+        if not df_input_nodes.empty:
+            df_hubs = df_input_nodes[df_input_nodes['type'] == 'hub'].copy()
+            df_hubs['BMCCode'] = df_hubs['node_id'].astype(str)
+            df_hubs['SupplierCode'] = df_hubs['BMCCode'].map(bmc_supp_code_map)
+            df_hubs['SupplierName'] = df_hubs['BMCCode'].map(bmc_supp_map)
             
-            grouped = df_bmc_supp.groupby('SupplierCode')
+            grouped = df_hubs.groupby('SupplierCode')
             for supp_code, group in grouped:
-                supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0])
+                supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0] if not group.empty and 'SupplierName' in group else '')
                 supp_data = {
                     "suppliercode": supp_code,
                     "suppliername": supp_name,
-                    "FCM": float(group.get('Final FCM Supply', group.get('FCM {Supply}', pd.Series([0]))).sum()),
-                    "MM": float(group.get('Final MM Supply', group.get('MM {Supply}', pd.Series([0]))).sum()),
-                    "BM": float(group.get('BM {Supply}', pd.Series([0])).sum()),
-                    "CM": float(group.get('CM {Supply}', pd.Series([0])).sum()),
+                    "FCM": 0.0, "MM": 0.0, "BM": 0.0, "CM": 0.0,
                     "BMC": []
                 }
-                supp_data['Total Supply'] = supp_data['FCM'] + supp_data['MM'] + supp_data['BM'] + supp_data['CM']
                 
                 for _, r in group.iterrows():
-                    fcm = float(safe_val(r.get('Final FCM Supply', r.get('FCM {Supply}', 0))))
-                    mm = float(safe_val(r.get('Final MM Supply', r.get('MM {Supply}', 0))))
-                    bm = float(safe_val(r.get('BM {Supply}', 0)))
-                    cm = float(safe_val(r.get('CM {Supply}', 0)))
-                    b_code = str(r.get('BMC ID', ''))
+                    b_code = str(r.get('BMCCode', ''))
+                    prod = str(r.get('commodity', '')).upper()
+                    cap = float(safe_val(r.get('capacity', 0)))
+                    
+                    fcm = cap if prod == 'FCM' else 0.0
+                    mm = cap if prod == 'MM' else 0.0
+                    bm = cap if prod == 'BM' else 0.0
+                    cm = cap if prod == 'CM' else 0.0
+                    
+                    supp_data['FCM'] += fcm
+                    supp_data['MM'] += mm
+                    supp_data['BM'] += bm
+                    supp_data['CM'] += cm
+                    
                     supp_data['BMC'].append({
                         "BMCCode": b_code,
-                        "BMCName": api_dict.get(b_code, str(r.get('BMC Name', ''))),
+                        "BMCName": api_dict.get(b_code, str(r.get('name', ''))),
                         "FCM": fcm, "MM": mm, "BM": bm, "CM": cm,
                         "TotalSupply": fcm + mm + bm + cm
                     })
+                supp_data['Total Supply'] = supp_data['FCM'] + supp_data['MM'] + supp_data['BM'] + supp_data['CM']
                 format_2.append(supp_data)
         result_doc['supplierProductSupply'] = format_2
         
         # 3. suppliercode, suppliername, all vehicle name key
         format_3 = []
-        if not df_veh.empty:
-            grouped_veh = df_veh.groupby('Supplier Code')
+        if not df_input_veh.empty:
+            grouped_veh = df_input_veh.groupby('SupplierCluster')
             for supp_code, group in grouped_veh:
-                supp_name = api_dict.get(str(supp_code), group['Supplier'].iloc[0] if 'Supplier' in group else '')
+                supp_name = api_dict.get(str(supp_code), "")
                 veh_data = {"suppliercode": supp_code, "suppliername": supp_name}
                 for col in group.columns:
-                    if col.startswith('V') and 'Vehicles' in col:
-                        veh_key = col.split(' ')[0]
-                        veh_data[veh_key] = int(group[col].sum())
+                    if col.startswith('V') and len(col) == 3:
+                        veh_data[col] = int(group[col].sum())
                 format_3.append(veh_data)
         result_doc['supplierVehicles'] = format_3
         
