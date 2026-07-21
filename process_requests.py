@@ -172,7 +172,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 prod_upper = str(prod).upper().strip()
                 if prod_upper == 'BM TO FCM':
                     return 'FCM'
-                elif prod_upper == 'FCM TO MM':
+                elif prod_upper == 'FCM TO MM' or prod_upper == 'BM TO MM':
                     return 'MM'
                 return prod
             df_routes['Product / Milk Type'] = df_routes['Product / Milk Type'].apply(map_product)
