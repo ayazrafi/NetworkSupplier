@@ -16,6 +16,7 @@ class Environment:
     
     SWAGGER_ENABLED = os.getenv("SWAGGER_ENABLED", "true").lower() == "true"
     API_DOCS_PATH = os.getenv("API_DOCS_PATH", "/docs")
+    JOB_ID = os.getenv("job", "false").lower() == "true"
 
     @classmethod
     def is_production(cls) -> bool:

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from src.config.environment import Environment
 from src.config.db import DatabaseConnection
 from src.repositories.request import (
     OptimizationRequestsRepository,
@@ -220,6 +221,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         print(f"Error parsing/saving results for {request_id}: {e}")
 
 async def poll_requests():
+    if not Environment.JOB_ID:
+        print("JOB_ID is not set to true in .env. Background worker will not run.")
+        return
+        
     await DatabaseConnection.connect()
     
     opt_repo = OptimizationRequestsRepository()
