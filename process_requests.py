@@ -184,7 +184,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
-                    "Flow Quantity": float(group['Flow'].sum()),
+                    "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "Distance": float(group['Distance (km)'].sum()),
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
@@ -196,7 +196,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
                     "BMCCode": bmc, "BMCName": api_dict.get(str(bmc), ""),
                     "ProductType": prod,
-                    "Flow Quantity": float(group['Flow'].sum()),
+                    "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "TotalDistance": float(group['Distance (km)'].sum()),
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
@@ -212,7 +212,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 for _, r in group.iterrows():
                     prod = str(r['Product / Milk Type']).upper()
                     if prod in d6:
-                        d6[prod] += float(r['Flow'])
+                        d6[prod] += float(r.get('Dispatch Quantity', 0.0))
                 format_6.append(d6)
                 
             # Format 7: Plant, ProductType, Flow Quantity, TotalDistance, Total No.of Trips
@@ -221,12 +221,12 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 format_7.append({
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
-                    "Flow Quantity": float(group['Flow'].sum()),
+                    "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "TotalDistance": float(group['Distance (km)'].sum()),
                     "Total No.of Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
                 
-            # Format 8: supplierCode, supplierName, ProductCode, V07...V35
+            # Format 8: supplierCode, supplierName, ProductCode, Dispatch Quantity, V07...V35
             g8 = df_routes.groupby(['SupplierCode', 'Product / Milk Type'])
             for (supp_code, prod), group in g8:
                 supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0] if 'SupplierName' in group and not group['SupplierName'].empty else '')
@@ -234,6 +234,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "supplierCode": supp_code,
                     "supplierName": supp_name,
                     "ProductCode": prod,
+                    "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "V07": 0, "V10": 0, "V12": 0, "V15": 0, "V20": 0, "V25": 0, "V30": 0, "V35": 0
                 }
                 for col in group.columns:
