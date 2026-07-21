@@ -37,6 +37,7 @@ async def get_requests_by_date(start_date: datetime, end_date: datetime):
 @router.get("/{jobId}/result", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
 async def get_request_result(jobId: str):
     try:
+        
         jobId='REQ0046'
         from src.repositories.result import OptimizerRequestResultRepository
         repo = OptimizerRequestResultRepository()
