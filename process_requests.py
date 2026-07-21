@@ -44,6 +44,18 @@ def fetch_distance_data():
 async def process_excel_and_save(request_id, excel_path, master_dict):
     results_repo = OptimizerRequestResultRepository()
     
+    # Fetch master data to map codes to names
+    api_dict = {}
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
+            r = client.get('https://apinode1.secutrak.in/mobileApiDairyM/getCustomerLocationMapping')
+            m_data = r.json().get('data', [])
+            api_dict = {str(d.get('code')): d.get('name', '') for d in m_data}
+    except Exception as e:
+        print(f"Error fetching location mapping in process_excel_and_save: {e}")
+        # fallback to master_dict
+        api_dict = {k: v.get('name', '') for k, v in master_dict.items()}
+
     try:
         output_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"results_{request_id}.xlsx")
         if not os.path.exists(output_path):
@@ -85,9 +97,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         if not df_nodes.empty:
             df_plants = df_nodes[df_nodes['Type'] == 'plant']
             for _, r in df_plants.iterrows():
+                p_code = str(r.get('Node ID', ''))
                 format_1.append({
-                    "plantcode": str(r.get('Node ID', '')),
-                    "plantname": str(r.get('Name', '')),
+                    "plantcode": p_code,
+                    "plantname": api_dict.get(p_code, str(r.get('Name', ''))),
                     "producttype": str(r.get('Commodity', '')),
                     "supply": float(safe_val(r.get('Inflow Throughput', 0)))
                 })
@@ -102,7 +115,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             
             grouped = df_bmc_supp.groupby('SupplierCode')
             for supp_code, group in grouped:
-                supp_name = group['SupplierName'].iloc[0]
+                supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0])
                 supp_data = {
                     "suppliercode": supp_code,
                     "suppliername": supp_name,
@@ -119,9 +132,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     mm = float(safe_val(r.get('Final MM Supply', r.get('MM {Supply}', 0))))
                     bm = float(safe_val(r.get('BM {Supply}', 0)))
                     cm = float(safe_val(r.get('CM {Supply}', 0)))
+                    b_code = str(r.get('BMC ID', ''))
                     supp_data['BMC'].append({
-                        "BMCCode": str(r.get('BMC ID', '')),
-                        "BMCName": str(r.get('BMC Name', '')),
+                        "BMCCode": b_code,
+                        "BMCName": api_dict.get(b_code, str(r.get('BMC Name', ''))),
                         "FCM": fcm, "MM": mm, "BM": bm, "CM": cm,
                         "TotalSupply": fcm + mm + bm + cm
                     })
@@ -133,7 +147,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         if not df_veh.empty:
             grouped_veh = df_veh.groupby('Supplier Code')
             for supp_code, group in grouped_veh:
-                supp_name = group['Supplier'].iloc[0] if 'Supplier' in group else ''
+                supp_name = api_dict.get(str(supp_code), group['Supplier'].iloc[0] if 'Supplier' in group else '')
                 veh_data = {"suppliercode": supp_code, "suppliername": supp_name}
                 for col in group.columns:
                     if col.startswith('V') and 'Vehicles' in col:
@@ -167,7 +181,9 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             g4 = df_routes.groupby(['SupplierCode', 'To Node ID', 'Product / Milk Type'])
             for (supp, plant, prod), group in g4:
                 format_4.append({
-                    "Supplier": supp, "Plant": plant, "ProductType": prod,
+                    "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
+                    "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
+                    "ProductType": prod,
                     "Flow Quantity": float(group['Flow'].sum()),
                     "Distance": float(group['Distance (km)'].sum()),
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
@@ -177,7 +193,9 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'Product / Milk Type'])
             for (supp, bmc, prod), group in g5:
                 format_5.append({
-                    "Supplier": supp, "BMCCode": bmc, "ProductType": prod,
+                    "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
+                    "BMCCode": bmc, "BMCName": api_dict.get(str(bmc), ""),
+                    "ProductType": prod,
                     "Flow Quantity": float(group['Flow'].sum()),
                     "TotalDistance": float(group['Distance (km)'].sum()),
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
@@ -186,7 +204,11 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             # Format 6: Plant, BMCCode, all product name keys
             g6 = df_routes.groupby(['To Node ID', 'From Node ID'])
             for (plant, bmc), group in g6:
-                d6 = {"Plant": plant, "BMCCode": bmc, "FCM": 0, "MM": 0, "BM": 0, "CM": 0}
+                d6 = {
+                    "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
+                    "BMCCode": bmc, "BMCName": api_dict.get(str(bmc), ""),
+                    "FCM": 0, "MM": 0, "BM": 0, "CM": 0
+                }
                 for _, r in group.iterrows():
                     prod = str(r['Product / Milk Type']).upper()
                     if prod in d6:
@@ -197,7 +219,8 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             g7 = df_routes.groupby(['To Node ID', 'Product / Milk Type'])
             for (plant, prod), group in g7:
                 format_7.append({
-                    "Plant": plant, "ProductType": prod,
+                    "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
+                    "ProductType": prod,
                     "Flow Quantity": float(group['Flow'].sum()),
                     "TotalDistance": float(group['Distance (km)'].sum()),
                     "Total No.of Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
@@ -206,7 +229,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             # Format 8: supplierCode, supplierName, ProductCode, V07...V35
             g8 = df_routes.groupby(['SupplierCode', 'Product / Milk Type'])
             for (supp_code, prod), group in g8:
-                supp_name = group['SupplierName'].iloc[0] if 'SupplierName' in group and not group['SupplierName'].empty else ''
+                supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0] if 'SupplierName' in group and not group['SupplierName'].empty else '')
                 row_data = {
                     "supplierCode": supp_code,
                     "supplierName": supp_name,
