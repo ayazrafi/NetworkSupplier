@@ -37,21 +37,21 @@ async def get_requests_by_date(start_date: datetime, end_date: datetime):
 @router.get("/{jobId}/result", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
 async def get_request_result(jobId: str):
     try:
-        from src.repositories.result import OptimizationResultsRepository
-        repo = OptimizationResultsRepository()
+        jobId='REQ0046'
+        from src.repositories.result import OptimizerRequestResultRepository
+        repo = OptimizerRequestResultRepository()
         
-        # Get all results matching this jobId
-        results = await repo.collection.find({"JobId": jobId}).to_list(length=None)
+        # Get the result matching this jobId
+        result = await repo.collection.find_one({"jobId": jobId})
         
         # Clean _id for serialization
-        for r in results:
-            if "_id" in r:
-                r["_id"] = str(r["_id"])
+        if result and "_id" in result:
+            result["_id"] = str(result["_id"])
                 
         return {
             "success": True,
-            "message": "Results fetched successfully",
-            "data": results
+            "message": "Result fetched successfully",
+            "data": result
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

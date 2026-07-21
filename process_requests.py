@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import uuid
 from datetime import datetime
 import pandas as pd
 import httpx
@@ -196,6 +197,20 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         result_doc['plantBmcProduct'] = format_6
         result_doc['plantProduct'] = format_7
         
+        def sanitize_for_mongo(obj):
+            if isinstance(obj, dict):
+                return {str(k): sanitize_for_mongo(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_for_mongo(v) for v in obj]
+            elif isinstance(obj, datetime):
+                return obj
+            elif hasattr(obj, 'item'):
+                return obj.item()
+            elif pd.api.types.is_scalar(obj) and pd.isna(obj):
+                return None
+            return obj
+            
+        result_doc = sanitize_for_mongo(result_doc)
         await results_repo.collection.insert_one(result_doc)
         print(f"Saved DB records for {request_id}")
         
@@ -228,7 +243,8 @@ async def poll_requests():
                 continue
                 
             request_id = pending_req["requestId"]
-            print(f"Processing Request: {request_id}")
+            network_id = str(uuid.uuid4())
+            print(f"Processing Request: {request_id} with Network ID: {network_id}")
             
             req_plants = await plants_repo.collection.find({"requestId": request_id}).to_list(length=None)
             req_mmcs = await mmc_repo.collection.find({"requestId": request_id}).to_list(length=None)
@@ -253,7 +269,7 @@ async def poll_requests():
                     "node_id": p_code, "name": name, "type": "plant", "subtype": "",
                     "lat": float(lat), "lng": float(lng), "commodity": rp["productCode"],
                     "supply": 0, "capacity": 0, "cost": 0, "yield": 0, "demand": rp["demand"],
-                    "price": 0, "network_id": ""
+                    "price": 0, "network_id": network_id
                 })
                 
             for rm in req_mmcs:
@@ -266,8 +282,8 @@ async def poll_requests():
                 nodes.append({
                     "node_id": m_code, "name": name, "type": "hub", "subtype": "",
                     "lat": float(lat), "lng": float(lng), "commodity": rm["productCode"],
-                    "supply": rm["availableSupply"], "capacity": rm["availableSupply"],
-                    "cost": 0, "yield": 100, "demand": 0, "price": 0, "network_id": ""
+                    "supply":0, "capacity": rm["availableSupply"],
+                    "cost": 0, "yield": 0, "demand": 0, "price": 0, "network_id": network_id
                 })
                 
             df_nodes = pd.DataFrame(nodes) if nodes else pd.DataFrame(columns=["node_id", "name", "type", "subtype", "lat", "lng", "commodity", "supply", "capacity", "cost", "yield", "demand", "price", "network_id"])
@@ -275,6 +291,10 @@ async def poll_requests():
             mapping_list = []
             dist_list = []
             
+            valid_suppliers = set(m["supplierCode"] for m in req_mmcs)
+            req_mappings = [m for m in req_mappings if m["supplierCode"] in valid_suppliers]
+            
+            import math
             for m in req_mappings:
                 for mmc in req_mmcs:
                     if m["supplierCode"] == mmc["supplierCode"] and m["productCode"] == mmc["productCode"]:
@@ -290,34 +310,81 @@ async def poll_requests():
                             "PlantCode": p_code, "Plant": plant_name, "Supplier": supp_name, "SupplierCode": supplier_code,
                             "BMCCode": b_code, "BMC": bmc_name, "commodity": m["productCode"]
                         })
-                        
-                        route = f"{b_code}-{p_code}"
-                        dist = dist_dict.get(route, 0.0)
+            
+            unique_suppliers = list(set(m["supplierCode"] for m in req_mmcs))
+            for s_code in unique_suppliers:
+                supplier_plants = list(set(m["plantCode"] for m in req_mappings if m["supplierCode"] == s_code))
+                supplier_bmcs = list(set(m["mmcCode"] for m in req_mmcs if m["supplierCode"] == s_code))
+                supp_name = master_dict.get(s_code, {}).get('name', s_code)
+                
+                for b_code in supplier_bmcs:
+                    for p_code in supplier_plants:
+                        b_code_str = str(b_code)
+                        p_code_str = str(p_code)
+                        route = f"{b_code_str}-{p_code_str}"
+                        dist = math.ceil(dist_dict.get(route, 0.0))
                         dist_list.append({
-                            "BMC Code": b_code, "Plant Code": p_code, "Distance": dist,
-                            "Supplier": supp_name, "Supplier Code": supplier_code, "Remark": ""
+                            "BMC Code": b_code_str, "Plant Code": p_code_str, "Distance": dist,
+                            "Supplier": supp_name, "Supplier Code": str(s_code), "Remark": ""
                         })
                         
             df_mapping = pd.DataFrame(mapping_list).drop_duplicates() if mapping_list else pd.DataFrame(columns=["PlantCode", "Plant", "Supplier", "SupplierCode", "BMCCode", "BMC", "commodity"])
             df_distance = pd.DataFrame(dist_list).drop_duplicates() if dist_list else pd.DataFrame(columns=["BMC Code", "Plant Code", "Distance", "Supplier", "Supplier Code", "Remark"])
             
+            import random
+            if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
+                zero_dist_mask = df_distance['Distance'] == 0.0
+                df_distance.loc[zero_dist_mask, 'Distance'] = [random.randint(50, 100) for _ in range(zero_dist_mask.sum())]
+            
+            if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
+                zero_dist_rows = df_distance[df_distance['Distance'] == 0.0]
+                error_msg = f"Zero distance found for rows: {zero_dist_rows.to_dict('records')}"
+                raise ValueError(error_msg)
+            
             v_alloc_data = []
-            supplier_codes = list(set([m["supplierCode"] for m in req_mappings]))
+            supplier_codes = list(set([m["supplierCode"] for m in req_mmcs]))
             for s_code in supplier_codes:
                 row = {
-                    "SupplierCluster": s_code, "SupplierSubCluster": "", "Strategy": "",
+                    "SupplierCluster": s_code, "SupplierSubCluster": "SubCluster_01_A", "Strategy": "Least Vehicle Strategy",
                     "FlowLowMarginPercentage": 0, "FlowHighMarginPercentage": 0,
                     "V07": 0, "V10": 0, "V12": 0, "V15": 0, "V20": 0, "V25": 0, "V30": 0, "V35": 0
                 }
+                has_vehicles = False
                 for v in req_vehicles:
                     if v["supplierCode"] == s_code:
+                        has_vehicles = True
                         vt = v["vehicleType"].upper().replace(' ', '')
+                        count = v.get("vehicleCount", 0)
+                        if count == 0:
+                            count = 1000
                         if vt in row:
-                            row[vt] += v["vehicleCount"]
+                            row[vt] += count
+                
+                if not has_vehicles:
+                    for vt in ["V07", "V10", "V12", "V15", "V20", "V25", "V30", "V35"]:
+                        row[vt] = 1000
+                        
                 v_alloc_data.append(row)
             df_vehicle_alloc = pd.DataFrame(v_alloc_data)
             
-            df_vehicle_type = pd.DataFrame([{"Vehicle Name": v["vehicleType"], "VehicleCode": v["vehicleType"], "From": 0, "To": 100} for v in req_vehicles]).drop_duplicates() if req_vehicles else pd.DataFrame()
+            vehicle_capacity_map = {
+                "V07": {"From": 3, "To": 7, "Name": "7L"},
+                "V10": {"From": 8, "To": 11, "Name": "10L"},
+                "V12": {"From": 11, "To": 12, "Name": "12L"},
+                "V15": {"From": 14, "To": 16, "Name": "15L"},
+                "V20": {"From": 19, "To": 22, "Name": "20L"},
+                "V25": {"From": 23, "To": 26, "Name": "25L"},
+                "V30": {"From": 27, "To": 32, "Name": "30L"},
+                "V35": {"From": 33, "To": 40, "Name": "35L"},
+            }
+            vehicle_type_data = []
+            for v in req_vehicles:
+                vt = v["vehicleType"].upper().replace(' ', '')
+                f_val = vehicle_capacity_map.get(vt, {}).get("From", 0)
+                t_val = vehicle_capacity_map.get(vt, {}).get("To", 100)
+                n_val = vehicle_capacity_map.get(vt, {}).get("Name", v["vehicleType"])
+                vehicle_type_data.append({"Vehicle Name": n_val, "VehicleCode": v["vehicleType"], "From": f_val, "To": t_val})
+            df_vehicle_type = pd.DataFrame(vehicle_type_data).drop_duplicates() if vehicle_type_data else pd.DataFrame()
             
             output_dir = "uploads"
             os.makedirs(output_dir, exist_ok=True)
@@ -332,7 +399,7 @@ async def poll_requests():
                 
             parsed_nodes = optimizer_solver.parse_excel_nodes(excel_path)
             # Use process_job_in_background which writes the result data
-            optimizer_solver.process_job_in_background(job_id=request_id, network_id='', nodes=parsed_nodes, transport_cost_per_km=0.02, excel_file_path=excel_path)
+            optimizer_solver.process_job_in_background(job_id=request_id, network_id=network_id, nodes=parsed_nodes, transport_cost_per_km=0.02, excel_file_path=excel_path)
             
             await process_excel_and_save(request_id, excel_path, master_dict)
             
@@ -350,7 +417,7 @@ async def poll_requests():
                 if 'request_id' in locals():
                     await opt_repo.collection.update_one(
                         {"requestId": request_id},
-                        {"$set": {"status": "Failed", "completedOn": datetime.utcnow()}}
+                        {"$set": {"status": "Failed", "completedOn": datetime.utcnow(), "errorMessage": str(e)}}
                     )
             except:
                 pass

@@ -16,7 +16,6 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 
-
 def parse_excel_nodes(file_path_or_df):
     if isinstance(file_path_or_df, pd.DataFrame):
         df = file_path_or_df
@@ -135,7 +134,7 @@ def parse_excel_nodes(file_path_or_df):
     return nodes
 
 
-# Jobs DB Helpers supporting MongoDB / in-memory fallback
+# Helper to determine raw milk type from finished product type
 def get_milk_type_for_product(product_type):
     ptype = (product_type or '').strip()
     if ptype.endswith(' Cheese'):
@@ -154,81 +153,67 @@ def serialize_node(node):
     return node_dict
 
 
-
-
-
-
-
-def get_optimal_vehicles(flow, vehicle_limits, caps=None, **kwargs):
+def get_optimal_vehicles(flow, vehicle_limits, caps=None, caps_ranges=None, **kwargs):
     if caps is None:
         caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
+    if caps_ranges is None:
+        caps_ranges = {k: (v * 0.8, v) for k, v in caps.items()}
+        
     if isinstance(vehicle_limits, dict) and 'limits' in vehicle_limits:
         vehicle_limits = vehicle_limits['limits']
 
-    if flow <= 0:
+    if flow < 6000:
         return {}
-        
 
+    sorted_caps = sorted(caps.items(), key=lambda x: x[1]) # ascending
+    result = {k: 0 for k in caps}
+    remaining = flow
     
-    sorted_caps = sorted(caps.items(), key=lambda x: x[1], reverse=True)
-        
-    # fallback greedy
-    def get_fallback():
-        res = {k: 0 for k in caps.keys()}
-        rem = flow
-        for cap_name, cap_val in sorted_caps:
-            limit = int(vehicle_limits.get(cap_name, 1000000))
-            if limit <= 0:
-                continue
-            import math
-            needed = int(math.ceil(rem / cap_val))
-            taken = min(needed, limit)
-            res[cap_name] = taken
-            rem -= taken * cap_val
-            if rem <= 0:
-                break
-        return {k: v for k, v in res.items() if v > 0}
-
-    try:
-        from ortools.linear_solver import pywraplp
-        solver = pywraplp.Solver.CreateSolver('SCIP')
-        if not solver:
-            return get_fallback()
-            
-        vars_dict = {}
-        for name, cap in caps.items():
+    while remaining >= 6000:
+        # 1. Find if it fits exactly within a truck's range
+        range_fit_truck = None
+        for name, val in sorted_caps:
             limit = int(vehicle_limits.get(name, 1000000))
-            vars_dict[name] = solver.IntVar(0, limit, f"count_{name}")
+            if limit > result[name]:
+                from_val, to_val = caps_ranges.get(name, (val * 0.8, val))
+                if from_val <= remaining <= to_val:
+                    range_fit_truck = name
+                    break
+                    
+        if range_fit_truck:
+            result[range_fit_truck] += 1
+            remaining = 0
+            break
             
-        solver.Add(sum(vars_dict[name] * cap for name, cap in caps.items()) >= flow)
-        strategy = kwargs.get('strategy', 'Least Vehicle Strategy')
-        
-        if str(strategy).strip().lower() == 'least vehicle strategy':
-            # Priority 1: Minimize number of vehicles
-            # Priority 2: Minimize total capacity (wasted space)
-            solver.Minimize(
-                100000.0 * sum(vars_dict[name] for name in caps) +
-                1.0 * sum(vars_dict[name] * cap for name, cap in caps.items())
-            )
+        # 2. Otherwise, find the largest truck that fits completely within the remaining
+        round_down_truck = None
+        round_down_val = None
+        for name, val in reversed(sorted_caps):
+            limit = int(vehicle_limits.get(name, 1000000))
+            if limit > result[name] and val <= remaining:
+                round_down_truck = name
+                round_down_val = val
+                break
+                
+        if round_down_truck:
+            result[round_down_truck] += 1
+            remaining -= round_down_val
         else:
-            # Priority 1: Minimize total capacity (wasted space)
-            # Priority 2: Minimize number of vehicles (tie-breaker)
-            solver.Minimize(
-                1.0 * sum(vars_dict[name] for name in caps) +
-                100.0 * sum(vars_dict[name] * cap for name, cap in caps.items())
-            )
-        
-        status = solver.Solve()
-        if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
-            result = {}
-            for name in caps:
-                val = int(round(vars_dict[name].solution_value()))
-                if val > 0:
-                    result[name] = val
-            return result
-        return get_fallback()
-    except Exception:
-        return get_fallback()
+            # 3. Remaining is < smallest truck. But >= 6000. So dispatch smallest available truck.
+            smallest_truck = None
+            for name, val in sorted_caps:
+                limit = int(vehicle_limits.get(name, 1000000))
+                if limit > result[name]:
+                    smallest_truck = name
+                    break
+            
+            if smallest_truck:
+                result[smallest_truck] += 1
+                remaining = 0
+            else:
+                break
+                
+    return {k: v for k, v in result.items() if v > 0}
 
 
 def get_vehicles_round_down(flow, vehicle_limits, caps=None, **kwargs):
@@ -309,17 +294,21 @@ def parse_bmc_vehicles(excel_file_path):
         
         # 1. Parse Vehicle Type to get dynamic capacities
         caps = {}
+        caps_ranges = {}
         if 'Vehicle Type' in xl.sheet_names:
             df_vt = xl.parse('Vehicle Type')
             capacity_col = next((c for c in df_vt.columns if 'name' in str(c).lower() or 'capacity' in str(c).lower() or 'type' in str(c).lower()), None)
             code_col = next((c for c in df_vt.columns if 'code' in str(c).lower() or 'vehiclecode' in str(c).lower()), 'VehicleCode')
             to_col = next((c for c in df_vt.columns if str(c).lower() == 'to'), 'To')
+            from_col = next((c for c in df_vt.columns if str(c).lower() == 'from'), 'From')
             
             if code_col in df_vt.columns and to_col in df_vt.columns:
                 for _, row in df_vt.iterrows():
                     vc = str(row[code_col]).strip()
                     to_val = float(row[to_col]) if pd.notnull(row[to_col]) else 0.0
+                    from_val = float(row[from_col]) if from_col in df_vt.columns and pd.notnull(row[from_col]) else (to_val * 0.8)
                     caps[vc] = to_val * 1000.0
+                    caps_ranges[vc] = (from_val * 1000.0, to_val * 1000.0)
                     
                     # Fix for V35: The user set 'To' = 5000 in Excel as a hack to mean "unlimited upper bound"
                     # for the flow filter, but this makes the physical vehicle capacity 5,000,000 L.
@@ -327,17 +316,23 @@ def parse_bmc_vehicles(excel_file_path):
                     # We restrict V35's physical capacity to a realistic 40,000 L (40 KL tanker).
                     if vc == 'V35' and caps[vc] > 100000:
                         caps[vc] = 40000.0
+                        caps_ranges[vc] = (30000.0, 40000.0)
         
         # Fallback
         if not caps:
             caps = {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0}
+        if not caps_ranges:
+            caps_ranges = {'7 L': (6000.0, 7000.0), '10 L': (8000.0, 10000.0), '12L': (10000.0, 12000.0), '15 L': (12000.0, 15000.0), '18 L': (15000.0, 18000.0), 'V30': (25000.0, 35000.0), 'V35': (30000.0, 35000.0)}
             
         if 'V30' not in caps:
             caps['V30'] = 35000.0
+            caps_ranges['V30'] = (25000.0, 35000.0)
         if 'V35' not in caps:
             caps['V35'] = 35000.0
+            caps_ranges['V35'] = (30000.0, 35000.0)
             
         vehicle_limits_map['global_caps'] = caps
+        vehicle_limits_map['global_caps_ranges'] = caps_ranges
 
         sheet_name = None
         for s in xl.sheet_names:
@@ -419,12 +414,13 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
         if excel_file_path and os.path.exists(excel_file_path):
             df_map = pd.read_excel(excel_file_path, sheet_name='Plant_BMC_Mapping')
             if 'Supplier' in df_map.columns:
+                df_map['Supplier'] = df_map['Supplier'].astype(str).str.strip()
                 bmc_to_supplier = df_map.drop_duplicates(subset=['BMCCode']).set_index('BMCCode')['Supplier'].to_dict()
     except:
         pass
 
     # Initialize solver
-    solver = pywraplp.Solver.CreateSolver('SCIP')
+    solver = pywraplp.Solver.CreateSolver('GLOP')
     if not solver:
         return {'status': 'ERROR', 'message': 'Could not create GLOP solver.'}
 
@@ -535,7 +531,7 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             if common_milk:
                 dist = get_pair_dist(h, p)
                 if dist <= MAX_DISTANCE_LIMIT:
-                    for m in common_milk:
+                    for m in sorted(common_milk):
                         # Strict mapping logic: if mapping exists, only allow mapped routes
                         if plant_bmc_mapping and (str(p['id']), str(h['id']), str(m)) not in plant_bmc_mapping:
                             continue
@@ -846,8 +842,8 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
 
         # Extract Hub -> Plant flows
         for (h_id, p_id, m), flow_var in flow_h_p.items():
-            val = flow_var.solution_value()
-            if val > 0.1:
+            val = round(flow_var.solution_value())
+            if val > 0:
                 h_node = next(x for x in hubs if x['id'] == h_id)
                 p_node = next(x for x in plants if x['id'] == p_id)
                 dist = get_pair_dist(h_node, p_node)
@@ -857,11 +853,18 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                 # Calculate optimal vehicles
                 supplier = bmc_to_supplier.get(h_id, '')
                 limits = vehicle_limits_map.get(supplier, {})
-                optimal_veh = get_optimal_vehicles(val, limits, caps=vehicle_limits_map.get('global_caps'))
+                optimal_veh = get_optimal_vehicles(val, limits, caps=vehicle_limits_map.get('global_caps'), caps_ranges=vehicle_limits_map.get('global_caps_ranges'))
                 global_caps = vehicle_limits_map.get('global_caps', {})
                 total_veh = sum(optimal_veh.values())
                 total_cap = sum(count * global_caps.get(v, 0) for v, count in optimal_veh.items())
-                excess = total_cap - val if total_veh > 0 else 0.0
+                # Cap the flow at total_cap if we left some undispatched, but only if we dispatched at least one vehicle
+                # (Removed overwrite of val to keep original solver flow)
+                dispatch_qty = val
+                if total_veh == 0:
+                    dispatch_qty = 0.0
+                elif 0 < total_cap < val:
+                    dispatch_qty = total_cap
+                excess = total_cap - dispatch_qty if total_veh > 0 else 0.0
                 
                 # Calculate trip-based cost
                 vehicle_rates = {'V07': 38, 'V10': 42, 'V12': 46, 'V15': 52, 'V20': 60, 'V25': 68, 'V30': 75, 'V35': 85}
@@ -994,6 +997,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 try:
                     df_map = pd.read_excel(excel_file_path, sheet_name='Plant_BMC_Mapping')
                     if 'Supplier' in df_map.columns:
+                        df_map['Supplier'] = df_map['Supplier'].astype(str).str.strip()
                         bmc_to_supplier = df_map.drop_duplicates(subset=['BMCCode']).set_index('BMCCode')['Supplier'].to_dict()
                 except:
                     pass
@@ -1156,6 +1160,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     r['excess_vehicle_capacity'] = 0.0
                     r['per_vehicle_empty']    = 0.0
                     r['vehicle_reason']       = reason_override
+                    r['dispatch_quantity']    = 0.0
                 else:
                     # Build reason for the normal supply path (excess_qty ≤ lq_val)
                     if not reason_override:
@@ -1172,10 +1177,13 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     r['excess_vehicle_capacity'] = round(excess_qty, 2)
                     r['per_vehicle_empty']    = round(per_veh_empty, 2)
                     r['vehicle_reason']       = reason_override
+                    r['dispatch_quantity']    = total_cap if total_cap < q else q
 
                     # Decrement from pool
-
-
+                    if key in subcluster_vehicle_pools:
+                        for vc, count in optimal_veh.items():
+                            if vc in subcluster_vehicle_pools[key]:
+                                subcluster_vehicle_pools[key][vc] -= count
             # For non-hub routes, add default columns
             for r in res.get('routes', []):
                 if r.get('from_type') != 'hub':
@@ -1187,6 +1195,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     r['excess_vehicle_capacity'] = 0.0
                     r['per_vehicle_empty'] = 0.0
                     r['vehicle_reason'] = "N/A"
+                    r['dispatch_quantity'] = 0.0
                     r['margin_low'] = 0.0
                     r['margin_high'] = 0.0
                     r['min_flow_quantity'] = r['flow']
@@ -1410,6 +1419,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         'To Longitude': to_node.get('lng'),
                         'Product / Milk Type': ptype,
                         'Flow': max(0.0, round(primary_flow, 2)),
+                        'Dispatch Quantity': max(0.0, round(primary_flow * (r.get('dispatch_quantity', 0.0) / r['flow']) if r.get('flow', 0) > 0 else 0.0, 2)),
                         'Unit': r['unit'],
                         'Distance (km)': r['distance'],
                         'Transport Cost (₹)': r['cost'],
@@ -1447,6 +1457,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         'To Longitude': to_node.get('lng'),
                         'Product / Milk Type': ext_ptype,
                         'Flow': round(ext_flow, 2),
+                        'Dispatch Quantity': max(0.0, round(ext_flow * (r.get('dispatch_quantity', 0.0) / r['flow']) if r.get('flow', 0) > 0 else 0.0, 2)),
                         'Unit': r['unit'],
                         'Distance (km)': r['distance'],
                         'Transport Cost (₹)': 0.0,
@@ -1608,13 +1619,17 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             base_comms.sort()
             
             plant_report_rows = []
+            plant_received_report_rows = []
             for p in plants:
                 row_dict = {'Plant ID': p['id'], 'Plant Name': p.get('name', p['id'])}
+                row_received_dict = {'Plant ID': p['id'], 'Plant Name': p.get('name', p['id'])}
                 plant_supplies = {}
+                plant_received = {}
                 for _, r in df_hub_to_plant.iterrows():
                     if r['To Node ID'] == p['id']:
                         c = r['Product / Milk Type']
                         plant_supplies[c] = plant_supplies.get(c, 0.0) + r['Flow']
+                        plant_received[c] = plant_received.get(c, 0.0) + r.get('Dispatch Quantity', 0.0)
                         
                 p_demands = p.get('demands', [])
                 plant_demands = {}
@@ -1633,33 +1648,55 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 for B in base_comms:
                     demand = plant_demands.get(B, 0.0)
                     supply = plant_supplies.get(B, 0.0)
+                    received = plant_received.get(B, 0.0)
+                    
                     if demand == 0:
                         pct = ""
+                        received_pct = ""
                     else:
                         pct = round((supply / demand * 100.0), 2)
+                        received_pct = round((received / demand * 100.0), 2)
                     
                     row_dict[f'{B} {{Demand}}'] = demand
                     row_dict[f'{B} {{Supply}}'] = supply
                     
+                    row_received_dict[f'{B} {{Demand}}'] = demand
+                    row_received_dict[f'{B} {{Received}}'] = received
+                    
                     has_conv = B in target_to_convs
                     if not has_conv:
                         row_dict[f'{B} {{Received Percentage}}'] = pct
+                        row_received_dict[f'{B} {{Received Percentage}}'] = received_pct
                     
                     final_supply = supply
+                    final_received = received
                     if has_conv:
                         for C in target_to_convs[B]:
                             c_supply = plant_supplies.get(C, 0.0)
+                            c_received = plant_received.get(C, 0.0)
                             row_dict[f'{C} {{Supply}}'] = c_supply
+                            row_received_dict[f'{C} {{Received}}'] = c_received
                             final_supply += c_supply
+                            final_received += c_received
                             
                         row_dict[f'Final {B} Supply'] = round(final_supply, 2)
+                        row_received_dict[f'Final {B} Received'] = round(final_received, 2)
+                        
                         final_pct = round((final_supply / demand * 100.0), 2) if demand > 0 else ""
+                        final_received_pct = round((final_received / demand * 100.0), 2) if demand > 0 else ""
                         row_dict[f'Final {B} Percentage'] = final_pct
+                        row_received_dict[f'Final {B} Percentage'] = final_received_pct
                         
                 plant_report_rows.append(row_dict)
+                plant_received_report_rows.append(row_received_dict)
+                
             df_plant_report = pd.DataFrame(plant_report_rows)
             if df_plant_report.empty:
                 df_plant_report = pd.DataFrame(columns=['Plant ID', 'Plant Name'])
+                
+            df_plant_received_report = pd.DataFrame(plant_received_report_rows)
+            if df_plant_received_report.empty:
+                df_plant_received_report = pd.DataFrame(columns=['Plant ID', 'Plant Name'])
             
             # --- 2. BMC Supply Report ---
             bmc_base_comms = [c for c in unique_commodities if ' to ' not in c]
@@ -1676,18 +1713,25 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             bmc_base_comms.sort()
             
             hub_report_rows = []
+            hub_dispatch_report_rows = []
             for h in hubs:
                 supplier = bmc_to_supplier.get(h['id'], '')
                 row_dict = {
                     'BMC ID': h['id'],
                     'BMC Name': h.get('name', h['id']),
                                     }
+                row_dispatch_dict = {
+                    'BMC ID': h['id'],
+                    'BMC Name': h.get('name', h['id']),
+                                    }
                 
                 hub_supplies = {}
+                hub_dispatch = {}
                 for _, r in df_hub_to_plant.iterrows():
                     if r['From Node ID'] == h['id']:
                         c = r['Product / Milk Type']
                         hub_supplies[c] = hub_supplies.get(c, 0.0) + r['Flow']
+                        hub_dispatch[c] = hub_dispatch.get(c, 0.0) + r.get('Dispatch Quantity', 0.0)
                         
                 h_prods = h.get('products', [])
                 hub_stocks = {}
@@ -1700,32 +1744,53 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 for B in bmc_base_comms:
                     stock = hub_stocks.get(B, 0.0)
                     supply = hub_supplies.get(B, 0.0)
+                    dispatch = hub_dispatch.get(B, 0.0)
                     if stock == 0:
                         pct = ""
+                        dispatch_pct = ""
                     else:
                         pct = round((supply / stock * 100.0), 2)
+                        dispatch_pct = round((dispatch / stock * 100.0), 2)
                         
                     row_dict[f'{B} {{Stock}}'] = stock
                     row_dict[f'{B} {{Supply}}'] = supply
                     
+                    row_dispatch_dict[f'{B} {{Stock}}'] = stock
+                    row_dispatch_dict[f'{B} {{Dispatch}}'] = dispatch
+                    
                     has_conv = B in source_to_convs
                     if not has_conv:
                         row_dict[f'{B} {{Supply Percentage}}'] = pct
+                        row_dispatch_dict[f'{B} {{Dispatch Percentage}}'] = dispatch_pct
                         
                     final_supply = supply
+                    final_dispatch = dispatch
                     if has_conv:
                         for C in source_to_convs[B]:
                             c_supply = hub_supplies.get(C, 0.0)
+                            c_dispatch = hub_dispatch.get(C, 0.0)
                             row_dict[f'{C} {{Supply}}'] = c_supply
+                            row_dispatch_dict[f'{C} {{Dispatch}}'] = c_dispatch
                             final_supply += c_supply
+                            final_dispatch += c_dispatch
                             
                         row_dict[f'Final {B} Supply'] = round(final_supply, 2)
+                        row_dispatch_dict[f'Final {B} Dispatch'] = round(final_dispatch, 2)
+                        
                         final_pct = round((final_supply / stock * 100.0), 2) if stock > 0 else ""
+                        final_dispatch_pct = round((final_dispatch / stock * 100.0), 2) if stock > 0 else ""
                         row_dict[f'Final {B} Percentage'] = final_pct
+                        row_dispatch_dict[f'Final {B} Percentage'] = final_dispatch_pct
                 hub_report_rows.append(row_dict)
+                hub_dispatch_report_rows.append(row_dispatch_dict)
+                
             df_hub_report = pd.DataFrame(hub_report_rows)
             if df_hub_report.empty:
                 df_hub_report = pd.DataFrame(columns=['BMC ID', 'BMC Name'])
+                
+            df_hub_dispatch_report = pd.DataFrame(hub_dispatch_report_rows)
+            if df_hub_dispatch_report.empty:
+                df_hub_dispatch_report = pd.DataFrame(columns=['BMC ID', 'BMC Name'])
                 
             # --- 3. Hub To Plant (optimal flow Hub -> Plant) ---
             # df_hub_to_plant is already generated above
@@ -1740,11 +1805,14 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     plant_names_list.append(name)
             
             flow_map = {}
+            dispatch_map = {}
             for _, r in df_hub_to_plant.iterrows():
                 key = (r['From Node ID'], r['To Node ID'], r['Product / Milk Type'])
                 flow_map[key] = flow_map.get(key, 0.0) + r['Flow']
+                dispatch_map[key] = dispatch_map.get(key, 0.0) + r.get('Dispatch Quantity', 0.0)
                     
             bmc_allocation_rows = []
+            bmc_dispatch_rows = []
             for h in hubs:
                 h_prods = h.get('products', [])
                 if not h_prods and 'capacity' in h:
@@ -1760,22 +1828,34 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         
                 for m in sorted(list(hub_commodities)):
                     total_flow = sum(flow_map.get((h['id'], p['id'], m), 0.0) for p in plants)
-                    if round(total_flow, 2) == 0:
-                        continue
+                    total_dispatch = sum(dispatch_map.get((h['id'], p['id'], m), 0.0) for p in plants)
+                    
+                    if round(total_flow, 2) > 0:
+                        supplier = bmc_to_supplier.get(h['id'], '')
+                        bmc_info = vehicle_limits_map.get(supplier, {})
+                        lq = bmc_info.get('leave_quantity', 0.0) if isinstance(bmc_info, dict) else 0.0
+                        row_dict = {
+                            'BMC': h.get('name', h['id']),
+                            'Product': m,
+                            'Quantity': round(total_flow, 2)
+                        }
+                        for p in plants:
+                            p_name = p.get('name', p['id'])
+                            flow_val = flow_map.get((h['id'], p['id'], m), 0.0)
+                            row_dict[p_name] = round(flow_val, 2)
+                        bmc_allocation_rows.append(row_dict)
                         
-                    supplier = bmc_to_supplier.get(h['id'], '')
-                    bmc_info = vehicle_limits_map.get(supplier, {})
-                    lq = bmc_info.get('leave_quantity', 0.0) if isinstance(bmc_info, dict) else 0.0
-                    row_dict = {
-                        'BMC': h.get('name', h['id']),
-                        'Product': m,
-                        'Quantity': round(total_flow, 2)
-                    }
-                    for p in plants:
-                        p_name = p.get('name', p['id'])
-                        flow_val = flow_map.get((h['id'], p['id'], m), 0.0)
-                        row_dict[p_name] = round(flow_val, 2)
-                    bmc_allocation_rows.append(row_dict)
+                    if round(total_dispatch, 2) > 0:
+                        row_dispatch_dict = {
+                            'BMC': h.get('name', h['id']),
+                            'Product': m,
+                            'Quantity': round(total_dispatch, 2)
+                        }
+                        for p in plants:
+                            p_name = p.get('name', p['id'])
+                            disp_val = dispatch_map.get((h['id'], p['id'], m), 0.0)
+                            row_dispatch_dict[p_name] = round(disp_val, 2)
+                        bmc_dispatch_rows.append(row_dispatch_dict)
                     
             df_bmc_wise_alloc = pd.DataFrame(bmc_allocation_rows)
             if not df_bmc_wise_alloc.empty:
@@ -1783,6 +1863,13 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 df_bmc_wise_alloc = df_bmc_wise_alloc.reindex(columns=cols)
             else:
                 df_bmc_wise_alloc = pd.DataFrame(columns=['BMC', 'Product', 'Quantity'] + plant_names_list)
+                
+            df_bmc_wise_dispatch = pd.DataFrame(bmc_dispatch_rows)
+            if not df_bmc_wise_dispatch.empty:
+                cols = ['BMC', 'Product', 'Quantity'] + [p_name for p_name in plant_names_list if p_name in df_bmc_wise_dispatch.columns]
+                df_bmc_wise_dispatch = df_bmc_wise_dispatch.reindex(columns=cols)
+            else:
+                df_bmc_wise_dispatch = pd.DataFrame(columns=['BMC', 'Product', 'Quantity'] + plant_names_list)
  
             # --- 5. Plant Wise Allocation Matrix ---
             bmc_names_list = []
@@ -1794,6 +1881,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     bmc_names_list.append(name)
                     
             plant_allocation_rows = []
+            plant_dispatch_rows = []
             for p in plants:
                 p_commodities = {}
                 p_demands = p.get('demands', [])
@@ -1817,10 +1905,14 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         
                 for m, req_qty in sorted(p_commodities.items()):
                     fulfilled_qty = sum(flow_map.get((h['id'], p['id'], m), 0.0) for h in hubs)
+                    dispatch_qty = sum(dispatch_map.get((h['id'], p['id'], m), 0.0) for h in hubs)
+                    
                     if req_qty == 0:
                         pct = ""
+                        dispatch_pct = ""
                     else:
                         pct = round((fulfilled_qty / req_qty * 100.0), 2)
+                        dispatch_pct = round((dispatch_qty / req_qty * 100.0), 2)
                         
                     row_dict = {
                         'Plant': p.get('name', p['id']),
@@ -1835,12 +1927,32 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                         row_dict[h_name] = round(flow_val, 2)
                     plant_allocation_rows.append(row_dict)
                     
+                    row_dispatch_dict = {
+                        'Plant': p.get('name', p['id']),
+                        'Product': m,
+                        'Required Quantity': round(req_qty, 2),
+                        'Fullfilled Quantity': round(dispatch_qty, 2),
+                        'Fullfilled Percentage': dispatch_pct
+                    }
+                    for h in hubs:
+                        h_name = h.get('name', h['id'])
+                        disp_val = dispatch_map.get((h['id'], p['id'], m), 0.0)
+                        row_dispatch_dict[h_name] = round(disp_val, 2)
+                    plant_dispatch_rows.append(row_dispatch_dict)
+                    
             df_plant_wise_alloc = pd.DataFrame(plant_allocation_rows)
             if not df_plant_wise_alloc.empty:
                 cols = ['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + [h_name for h_name in bmc_names_list if h_name in df_plant_wise_alloc.columns]
                 df_plant_wise_alloc = df_plant_wise_alloc.reindex(columns=cols)
             else:
                 df_plant_wise_alloc = pd.DataFrame(columns=['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + bmc_names_list)
+                
+            df_plant_wise_dispatch = pd.DataFrame(plant_dispatch_rows)
+            if not df_plant_wise_dispatch.empty:
+                cols = ['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + [h_name for h_name in bmc_names_list if h_name in df_plant_wise_dispatch.columns]
+                df_plant_wise_dispatch = df_plant_wise_dispatch.reindex(columns=cols)
+            else:
+                df_plant_wise_dispatch = pd.DataFrame(columns=['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + bmc_names_list)
             
             # Calculate KPIs
             try:
@@ -1863,141 +1975,274 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 df_kpi = pd.DataFrame([{'Trips': 0, 'Trips/1M L': 0, 'Avg L/trip': 0, 'KM/1000 L': 0}])
 
             # Save sheets
+            
+            # Create and save a dedicated BMC Vehicle Allocation sheet
+            veh_cols = [f'{vc} Vehicles' for vc in vehicle_limits_map.get('global_caps', {}).keys()]
+            df_veh_alloc = df_hub_to_plant[[
+                'From Node ID', 'From Name', 'To Node ID', 'To Name', 
+                'Product / Milk Type', 'Flow', 'Dispatch Quantity', 'Unit', 'Distance (km)', 'Transport Cost (₹)'
+            ] + veh_cols + [
+                'Total Vehicles', 'Total Vehicle Capacity (L)', 'Excess Vehicle Capacity (L)',
+                'SupplierCluster', 'SupplierSubCluster', 'Strategy',
+                'FlowLowMarginPercentage', 'FlowHighMarginPercentage',
+                'MinimumFlowQuantity', 'MaximumFlowQuantity', 'VehicleReason'
+            ]].copy()
+            df_veh_alloc['Left Quantity'] = df_veh_alloc['Flow'] - df_veh_alloc['Dispatch Quantity']
+            df_veh_alloc = df_veh_alloc.rename(columns={
+                'From Node ID': 'BMC ID',
+                'From Name': 'BMC Name',
+                'To Node ID': 'Plant ID',
+                'To Name': 'Plant Name',
+                'Flow': 'Flow Quantity'
+            })
+            
+            # --- Vehicle Wise Report ---
+            v_codes = ['V07', 'V10', 'V12', 'V15', 'V20', 'V25', 'V30', 'V35']
+            v_cols_present = [f"{v} Vehicles" for v in v_codes if f"{v} Vehicles" in df_veh_alloc.columns]
+            
+            max_dist = df_veh_alloc['Distance (km)'].max()
+            if pd.isna(max_dist) or max_dist == 0:
+                max_dist = 150
+            max_dist_val = int(max_dist)
+            bins = list(range(0, ((max_dist_val // 150) + 2) * 150, 150))
+            labels = [f"{bins[i]}-{bins[i+1]}" for i in range(len(bins)-1)]
+            df_veh_alloc_copy = df_veh_alloc.copy()
+            df_veh_alloc_copy['Distance Range'] = pd.cut(df_veh_alloc_copy['Distance (km)'], bins=bins, labels=labels, right=False, include_lowest=True)
+            
+            vehicle_report_dist = df_veh_alloc_copy.groupby('Distance Range', observed=True)[v_cols_present].sum().T
+            vehicle_report_dist.index = [c.replace(' Vehicles', '') for c in vehicle_report_dist.index]
+            vehicle_report_dist.index.name = 'Vehicle Category'
+            vehicle_report_dist.reset_index(inplace=True)
+            
+            dist_columns = [col for col in vehicle_report_dist.columns if col != 'Vehicle Category']
+            for col in dist_columns:
+                vehicle_report_dist[col] = pd.to_numeric(vehicle_report_dist[col], errors='coerce').fillna(0)
+            vehicle_report_dist['Total'] = vehicle_report_dist[dist_columns].sum(axis=1)
+            
+            total_row_dist = pd.Series(index=vehicle_report_dist.columns, dtype='object')
+            total_row_dist['Vehicle Category'] = 'Grand Total'
+            for col in dist_columns + ['Total']:
+                total_row_dist[col] = pd.to_numeric(vehicle_report_dist[col], errors='coerce').sum()
+                
+            # --- Total Supply Report ---
+            df_total_supply_temp = df_hub_to_plant.copy()
+            if not df_total_supply_temp.empty:
+                df_total_supply_temp['Base Milk'] = df_total_supply_temp['Product / Milk Type'].apply(lambda x: x.split(' to ')[0].strip() if ' to ' in str(x) else str(x).strip())
+                df_total_supply_temp = df_total_supply_temp.drop(columns=['Product / Milk Type', 'Route ID'], errors='ignore')
+                
+                group_cols = ['From Node ID', 'To Node ID', 'Base Milk']
+                agg_dict = {}
+                for col in df_total_supply_temp.columns:
+                    if col in group_cols:
+                        continue
+                    if col in ['Flow', 'Dispatch Quantity', 'Transport Cost (₹)', 'Total Vehicles', 'Total Vehicle Capacity (L)', 'Excess Vehicle Capacity (L)'] or str(col).endswith(' Vehicles'):
+                        agg_dict[col] = 'sum'
+                    else:
+                        agg_dict[col] = 'first'
+                
+                df_total_supply = df_total_supply_temp.groupby(group_cols, observed=True).agg(agg_dict).reset_index()
+                
+                # Reconstruct Route ID
+                df_total_supply['Route ID'] = 'route_' + df_total_supply['From Node ID'].astype(str) + '_' + df_total_supply['To Node ID'].astype(str) + '_' + df_total_supply['Base Milk'].astype(str).str.replace(' ', '_')
+                
+                original_cols = list(df_hub_to_plant.columns)
+                if 'Product / Milk Type' in original_cols:
+                    idx = original_cols.index('Product / Milk Type')
+                    new_cols = original_cols[:idx] + ['Base Milk'] + original_cols[idx+1:]
+                else:
+                    new_cols = original_cols + ['Base Milk']
+                    
+                df_total_supply = df_total_supply[[c for c in new_cols if c in df_total_supply.columns]]
+                
+                # Add Total Distance column
+                if 'Dispatch Quantity' in df_total_supply.columns:
+                    df_total_supply['Total Distance'] = df_total_supply.apply(lambda r: (r.get('Total Vehicles', 0) * r.get('Distance (km)', 0)) if r.get('Dispatch Quantity', 0) > 0 else 0.0, axis=1)
+                else:
+                    df_total_supply['Total Distance'] = df_total_supply.get('Total Vehicles', 0) * df_total_supply.get('Distance (km)', 0)
+                    
+                # Add prorated Dispatch Capacity columns
+                global_caps = vehicle_limits_map.get('global_caps', {})
+                for vc, cap in global_caps.items():
+                    v_col = f'{vc} Vehicles'
+                    new_col = f'{vc} Dispatch Capacity'
+                    if v_col in df_total_supply.columns:
+                        if 'Dispatch Quantity' in df_total_supply.columns:
+                            df_total_supply[new_col] = df_total_supply.apply(
+                                lambda r: round(r['Dispatch Quantity'] * (r[v_col] * cap) / r['Total Vehicle Capacity (L)'], 2) if r.get('Total Vehicle Capacity (L)', 0) > 0 else 0.0, 
+                                axis=1
+                            )
+                        else:
+                            df_total_supply[new_col] = df_total_supply.apply(
+                                lambda r: round(r['Flow'] * (r[v_col] * cap) / r['Total Vehicle Capacity (L)'], 2) if r.get('Total Vehicle Capacity (L)', 0) > 0 else 0.0, 
+                                axis=1
+                            )
+            else:
+                cols = [c if c != 'Product / Milk Type' else 'Base Milk' for c in df_hub_to_plant.columns] + ['Total Distance']
+                global_caps = vehicle_limits_map.get('global_caps', {})
+                for vc in global_caps.keys():
+                    cols.append(f'{vc} Dispatch Capacity')
+                df_total_supply = pd.DataFrame(columns=cols)
+            # --- Vehicle Wise Bifurcation Report ---
+            veh_bifurcation_rows = []
+            global_caps = vehicle_limits_map.get('global_caps', {})
+            for vc, cap in global_caps.items():
+                v_col = f'{vc} Vehicles'
+                if v_col in df_total_supply.columns and df_total_supply[v_col].sum() > 0:
+                    total_veh = df_total_supply[v_col].sum()
+                    total_dist = (df_total_supply['Distance (km)'] * df_total_supply[v_col]).sum()
+                    
+                    disp_cap_col = f'{vc} Dispatch Capacity'
+                    if disp_cap_col in df_total_supply.columns:
+                        total_supply_v = df_total_supply[disp_cap_col].sum()
+                    else:
+                        supply_series = df_total_supply['Flow'] * (df_total_supply[v_col] * cap) / df_total_supply['Total Vehicle Capacity (L)'].replace({0: 1})
+                        supply_series = supply_series.where(df_total_supply['Total Vehicle Capacity (L)'] > 0, 0)
+                        total_supply_v = supply_series.sum()
+                    
+                    veh_bifurcation_rows.append({
+                        'Vehicle Category': vc,
+                        'Total Distance': total_dist,
+                        'Dispatch Capacity': total_supply_v,
+                        'TotalVehicle': total_veh
+                    })
+                    
+            df_vehicle_bifurcation = pd.DataFrame(veh_bifurcation_rows)
+            if not df_vehicle_bifurcation.empty:
+                total_row_bif = {
+                    'Vehicle Category': 'Grand Total',
+                    'Total Distance': df_vehicle_bifurcation['Total Distance'].sum(),
+                    'Dispatch Capacity': df_vehicle_bifurcation['Dispatch Capacity'].sum(),
+                    'TotalVehicle': df_vehicle_bifurcation['TotalVehicle'].sum()
+                }
+                df_vehicle_bifurcation = pd.concat([df_vehicle_bifurcation, pd.DataFrame([total_row_bif])], ignore_index=True)
+            else:
+                df_vehicle_bifurcation = pd.DataFrame(columns=['Vehicle Category', 'Total Distance', 'Dispatch Capacity', 'TotalVehicle'])
+
+            df_vehicle_wise_report = pd.concat([vehicle_report_dist, pd.DataFrame([total_row_dist])], ignore_index=True)
+            
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                df_vehicle_wise_report.to_excel(writer, sheet_name='Vehicle Wise Report', index=False)
                 df_kpi.to_excel(writer, sheet_name='KPI Summary', index=False)
                 df_summary.to_excel(writer, sheet_name='Summary', index=False)
                 df_nodes.to_excel(writer, sheet_name='Nodes', index=False)
                 df_routes.to_excel(writer, sheet_name='Routes', index=False)
                 df_plant_report.to_excel(writer, sheet_name='Plant Consumption Report', index=False)
+                df_plant_received_report.to_excel(writer, sheet_name='Plant Received Report', index=False)
                 df_hub_report.to_excel(writer, sheet_name='BMC Supply Report', index=False)
+                df_hub_dispatch_report.to_excel(writer, sheet_name='BMC Dispatch Report', index=False)
                 df_hub_to_plant.to_excel(writer, sheet_name='Hub To Plant', index=False)
+                df_total_supply.to_excel(writer, sheet_name='Total Supply', index=False)
+                df_vehicle_bifurcation.to_excel(writer, sheet_name='Vehicle Wise Bifurcation', index=False)
                 df_bmc_wise_alloc.to_excel(writer, sheet_name='BMC Wise Allocation', index=False)
+                df_bmc_wise_dispatch.to_excel(writer, sheet_name='BMC Wise Dispatch', index=False)
                 df_plant_wise_alloc.to_excel(writer, sheet_name='Plant Wise Allocation', index=False)
-                
-                # Create and save a dedicated BMC Vehicle Allocation sheet
-                veh_cols = [f'{vc} Vehicles' for vc in vehicle_limits_map.get('global_caps', {}).keys()]
-                df_veh_alloc = df_hub_to_plant[[
-                    'From Node ID', 'From Name', 'To Node ID', 'To Name', 
-                    'Product / Milk Type', 'Flow', 'Unit', 'Distance (km)', 'Transport Cost (₹)'
-                ] + veh_cols + [
-                    'Total Vehicles', 'Total Vehicle Capacity (L)', 'Excess Vehicle Capacity (L)',
-                    'SupplierCluster', 'SupplierSubCluster', 'Strategy',
-                    'FlowLowMarginPercentage', 'FlowHighMarginPercentage',
-                    'MinimumFlowQuantity', 'MaximumFlowQuantity', 'VehicleReason'
-                ]].copy()
-                df_veh_alloc = df_veh_alloc.rename(columns={
-                    'From Node ID': 'BMC ID',
-                    'From Name': 'BMC Name',
-                    'To Node ID': 'Plant ID',
-                    'To Name': 'Plant Name',
-                    'Flow': 'Flow Quantity'
-                })
+                df_plant_wise_dispatch.to_excel(writer, sheet_name='Plant Wise Dispatch', index=False)
                 df_veh_alloc.to_excel(writer, sheet_name='BMC Vehicle Allocation', index=False)
                 
                 # --- New Supplier Report ---
-                dispatch_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'cases', 'Summarized_Dispatch_Details.xlsx')
-                df_dispatch = pd.DataFrame()
-                if os.path.exists(dispatch_file_path):
-                    try:
-                        df_dispatch = pd.read_excel(dispatch_file_path)
-                        # Ensure columns are strings for matching
-                        if 'Supplier' in df_dispatch.columns:
-                            df_dispatch['Supplier'] = df_dispatch['Supplier'].astype(str).str.replace(r'\.0$', '', regex=True)
-                        if 'Supplier Code' in df_dispatch.columns:
-                            df_dispatch['Supplier Code'] = df_dispatch['Supplier Code'].astype(str).str.replace(r'\.0$', '', regex=True)
-                        if 'BMC Code' in df_dispatch.columns:
-                            df_dispatch['BMC Code'] = df_dispatch['BMC Code'].astype(str).str.replace(r'\.0$', '', regex=True)
-                    except Exception as e:
-                        print("Error reading Summarized_Dispatch_Details:", e)
+                try:
+                    dispatch_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'cases', 'Summarized_Dispatch_Details_Supplier-sup-plant.xlsx')
+                    df_dispatch = pd.DataFrame()
+                    if os.path.exists(dispatch_file_path):
+                        try:
+                            df_dispatch = pd.read_excel(dispatch_file_path)
+                            # Ensure columns are strings for matching
+                            if 'Supplier' in df_dispatch.columns:
+                                df_dispatch['Supplier'] = df_dispatch['Supplier'].astype(str).str.replace(r'\.0$', '', regex=True)
+                            if 'Supplier Code' in df_dispatch.columns:
+                                df_dispatch['Supplier Code'] = df_dispatch['Supplier Code'].astype(str).str.replace(r'\.0$', '', regex=True)
+                        except Exception as e:
+                            print("Error reading Summarized_Dispatch_Details_Supplier:", e)
 
-                bmc_to_sup_code = {}
-                bmc_to_sup_name = {}
-                if excel_file_path and os.path.exists(excel_file_path):
-                    try:
-                        df_dist = pd.read_excel(excel_file_path, sheet_name='Distance')
-                        for _, row in df_dist.iterrows():
-                            bmc_c = str(row.get('BMC Code', '')).strip()
-                            if bmc_c:
-                                bmc_to_sup_code[bmc_c] = str(row.get('Supplier Code', ''))
-                                bmc_to_sup_name[bmc_c] = str(row.get('Supplier', ''))
-                    except Exception as e:
-                        print("Error reading Distance sheet for Supplier Report:", e)
+                    sup_code_to_name = {}
+                    if excel_file_path and os.path.exists(excel_file_path):
+                        try:
+                            df_dist = pd.read_excel(excel_file_path, sheet_name='Distance')
+                            for _, row in df_dist.iterrows():
+                                sc = str(row.get('Supplier Code', '')).strip()
+                                if sc and sc not in sup_code_to_name:
+                                    sup_code_to_name[sc] = str(row.get('Supplier', ''))
+                        except Exception as e:
+                            print("Error reading Distance sheet for Supplier Report:", e)
 
-                supplier_report_rows = []
-                for bmc_id, group in df_hub_to_plant.groupby('From Node ID'):
-                    bmc_name = group.iloc[0]['From Name']
-                    total_tankers = group['Total Vehicles'].sum()
-                    total_distance = group['Distance (km)'].sum()
-                    total_supply = group['Flow'].sum()
+                    supplier_report_rows = []
                     
-                    veh_counts = {}
-                    for vc in veh_cols:
-                        if vc in group.columns:
-                            veh_counts[vc] = int(group[vc].sum())
-                        else:
-                            veh_counts[vc] = 0
-                            
-                    sup_code = bmc_to_sup_code.get(bmc_id, '')
-                    sup_name = bmc_to_sup_name.get(bmc_id, '')
-                    
-                    # Split MMC Code (bmc_id) to get Supplier Code and BMC Code
-                    extracted_sup_code = ''
-                    extracted_bmc_code = ''
-                    parts = str(bmc_id).split('_')
-                    if len(parts) >= 2:
-                        extracted_sup_code = parts[0].strip()
-                        extracted_bmc_code = parts[1].strip()
-                    else:
-                        extracted_sup_code = str(bmc_id).strip()
+                    # Assign Supplier Code to df_total_supply
+                    df_total_supply_sup = df_total_supply.copy()
+                    df_total_supply_sup['Supplier Code'] = df_total_supply_sup['From Node ID'].apply(
+                        lambda x: str(x).split('_')[0].strip() if len(str(x).split('_')) >= 2 else str(x).strip()
+                    )
 
-                    row_dict = {
-                        'Supplier': sup_name,
-                        'Supplier Code': extracted_sup_code,
-                        'BMC Code': extracted_bmc_code,
-                        'MMC Code': bmc_id,
-                        'MMC Name': bmc_name
-                    }
-                    
-                    # Add individual vehicle columns
-                    for vc in veh_cols:
-                        row_dict[vc] = veh_counts.get(vc, 0)
+                    for sup_code, group in df_total_supply_sup.groupby('Supplier Code'):
+                        total_tankers = group['Total Vehicles'].sum()
                         
-                    row_dict['Total Vehicles'] = total_tankers
-                    row_dict['Total Distance'] = total_distance
-                    row_dict['Total Supply'] = total_supply
+                        if 'Total Distance' in group.columns:
+                            total_distance = group['Total Distance'].sum()
+                        elif 'Dispatch Quantity' in group.columns:
+                            total_distance = group.loc[group['Dispatch Quantity'] > 0, 'Distance (km)'].sum()
+                        else:
+                            total_distance = group['Distance (km)'].sum()
 
-                    # Join with df_dispatch
-                    if not df_dispatch.empty and extracted_sup_code and extracted_bmc_code:
-                        sup_col = 'Supplier Code' if 'Supplier Code' in df_dispatch.columns else 'Supplier'
-                        bmc_col = 'BMC Code'
-                        if bmc_col in df_dispatch.columns:
-                            match = df_dispatch[(df_dispatch[sup_col] == extracted_sup_code) & (df_dispatch[bmc_col] == extracted_bmc_code)]
-                            if not match.empty:
-                                match_row = match.iloc[0].to_dict()
-                                for k, v in match_row.items():
-                                    if k not in row_dict:
-                                        row_dict[k] = v
-                                    else:
-                                        row_dict[f'Dispatch_{k}'] = v
+                        if 'Dispatch Quantity' in group.columns:
+                            total_supply = group['Dispatch Quantity'].sum()
+                            left_quantity = (group['Flow'] - group['Dispatch Quantity']).sum()
+                        else:
+                            total_supply = group['Flow'].sum()
+                            left_quantity = group['Flow'].sum()
+                        
+                        veh_counts = {}
+                        for vc in veh_cols:
+                            if vc in group.columns:
+                                veh_counts[vc] = int(group[vc].sum())
+                            else:
+                                veh_counts[vc] = 0
+                                
+                        sup_name = sup_code_to_name.get(sup_code, '')
+
+                        row_dict = {
+                            'Supplier': sup_name,
+                            'Supplier Code': sup_code,
+                        }
+                        
+                        # Add individual vehicle columns
+                        for vc in veh_cols:
+                            row_dict[vc] = veh_counts.get(vc, 0)
+                            
+                        row_dict['Total Vehicles'] = total_tankers
+                        row_dict['Total Distance'] = total_distance
+                        row_dict['Total Supply'] = total_supply
+                        row_dict['Left Quantity'] = left_quantity
+
+                        # Join with df_dispatch
+                        if not df_dispatch.empty and sup_code:
+                            sup_col = 'Supplier Code' if 'Supplier Code' in df_dispatch.columns else 'Supplier'
+                            if sup_col in df_dispatch.columns:
+                                match = df_dispatch[df_dispatch[sup_col] == sup_code]
+                                if not match.empty:
+                                    match_row = match.iloc[0].to_dict()
+                                    for k, v in match_row.items():
+                                        if k not in row_dict:
+                                            row_dict[k] = v
+                                        else:
+                                            row_dict[f'Dispatch_{k}'] = v
+                        
+                        supplier_report_rows.append(row_dict)
                     
-                    supplier_report_rows.append(row_dict)
-                
-                df_supplier_summary = pd.DataFrame(supplier_report_rows)
-                df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
-                
-        else:
-            pass
+                    df_supplier_summary = pd.DataFrame(supplier_report_rows)
+                    df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
+                    
+                except Exception as e:
+                    print("Error creating Supplier Report:", e)
+            
+            #update_job_completed(job_id, output_filename, res['summary'])
+        #else:
+            #update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")
+            
     except Exception as e:
         import traceback
         error_msg = f"Exception: {str(e)}\n{traceback.format_exc()}"
         print("Job processing failed:", error_msg)
-
-
-
-
-
-
-
+        #update_job_failed(job_id, error_msg[:1000])
 
 
 
