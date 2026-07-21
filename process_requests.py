@@ -142,16 +142,26 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 format_3.append(veh_data)
         result_doc['supplierVehicles'] = format_3
         
-        # 4, 5, 6, 7 from 'Routes' or 'Hub To Plant'
+        # 4, 5, 6, 7, 8 from 'Routes' or 'Hub To Plant'
         format_4 = []
         format_5 = []
         format_6 = []
         format_7 = []
+        format_8 = []
         if not df_routes.empty:
             df_routes['From Node ID'] = df_routes['From Node ID'].astype(str)
             df_routes['To Node ID'] = df_routes['To Node ID'].astype(str)
             df_routes['SupplierCode'] = df_routes['From Node ID'].map(bmc_supp_code_map)
             df_routes['SupplierName'] = df_routes['From Node ID'].map(bmc_supp_map)
+            
+            def map_product(prod):
+                prod_upper = str(prod).upper().strip()
+                if prod_upper == 'BM TO FCM':
+                    return 'FCM'
+                elif prod_upper == 'FCM TO MM':
+                    return 'MM'
+                return prod
+            df_routes['Product / Milk Type'] = df_routes['Product / Milk Type'].apply(map_product)
             
             # Format 4: Supplier, Plant, ProductType, sum of flow, sum of Distance, no of trips (basis of supplier, plant, product)
             g4 = df_routes.groupby(['SupplierCode', 'To Node ID', 'Product / Milk Type'])
@@ -193,10 +203,28 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Total No.of Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
                 
+            # Format 8: supplierCode, supplierName, ProductCode, V07...V35
+            g8 = df_routes.groupby(['SupplierCode', 'Product / Milk Type'])
+            for (supp_code, prod), group in g8:
+                supp_name = group['SupplierName'].iloc[0] if 'SupplierName' in group and not group['SupplierName'].empty else ''
+                row_data = {
+                    "supplierCode": supp_code,
+                    "supplierName": supp_name,
+                    "ProductCode": prod,
+                    "V07": 0, "V10": 0, "V12": 0, "V15": 0, "V20": 0, "V25": 0, "V30": 0, "V35": 0
+                }
+                for col in group.columns:
+                    if col.startswith('V') and 'Vehicles' in col:
+                        veh_key = col.split(' ')[0]
+                        if veh_key in row_data:
+                            row_data[veh_key] = int(group[col].sum())
+                format_8.append(row_data)
+
         result_doc['supplierPlantProduct'] = format_4
         result_doc['supplierBmcProduct'] = format_5
         result_doc['plantBmcProduct'] = format_6
         result_doc['plantProduct'] = format_7
+        result_doc['supplierProductVehicles'] = format_8
         
         def sanitize_for_mongo(obj):
             if isinstance(obj, dict):
