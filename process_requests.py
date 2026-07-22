@@ -126,7 +126,8 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 }
                 
                 for _, r in group.iterrows():
-                    b_code = str(r.get('BMCCode', ''))
+                    b_code_full = str(r.get('BMCCode', ''))
+                    b_code = b_code_full.split('_')[-1] if '_' in b_code_full else b_code_full
                     prod = str(r.get('commodity', '')).upper()
                     cap = float(safe_val(r.get('capacity', 0)))
                     
@@ -199,9 +200,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             # Format 5: Supplier, BMCCode, ProductType, flow, distance, trips (basis of BMCCode, ProductType)
             g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'Product / Milk Type'])
             for (supp, bmc, prod), group in g5:
+                actual_bmc = str(bmc).split('_')[-1] if '_' in str(bmc) else str(bmc)
                 format_5.append({
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
-                    "BMCCode": bmc, "BMCName": api_dict.get(str(bmc), ""),
+                    "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, ""),
                     "ProductType": prod,
                     "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "TotalDistance": float(group['Distance (km)'].sum()),
@@ -211,9 +213,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             # Format 6: Plant, BMCCode, all product name keys
             g6 = df_routes.groupby(['To Node ID', 'From Node ID'])
             for (plant, bmc), group in g6:
+                actual_bmc = str(bmc).split('_')[-1] if '_' in str(bmc) else str(bmc)
                 d6 = {
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
-                    "BMCCode": bmc, "BMCName": api_dict.get(str(bmc), ""),
+                    "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, ""),
                     "FCM": 0, "MM": 0, "BM": 0, "CM": 0
                 }
                 for _, r in group.iterrows():
