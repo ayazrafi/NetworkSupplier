@@ -142,6 +142,8 @@ app.add_middleware(
 from fastapi.staticfiles import StaticFiles
 os.makedirs("outputs", exist_ok=True)
 app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Register Controllers / Routers
 app.include_router(auth.router)
