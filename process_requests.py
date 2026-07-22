@@ -367,13 +367,16 @@ async def poll_requests():
                 
             for rm in req_mmcs:
                 m_code = str(rm["mmcCode"])
+                s_code = str(rm.get("supplierCode", ""))
                 db_bmc = master_dict.get(m_code, {})
                 lat = db_bmc.get("geocoord", "0.0,0.0").split(",")[0] if db_bmc.get("geocoord") else 0.0
                 lng = db_bmc.get("geocoord", "0.0,0.0").split(",")[1] if db_bmc.get("geocoord") else 0.0
                 name = db_bmc.get("name", m_code)
                 
+                hub_node_id = f"{s_code}_{m_code}" if s_code else m_code
+                
                 nodes.append({
-                    "node_id": m_code, "name": name, "type": "hub", "subtype": "",
+                    "node_id": hub_node_id, "name": name, "type": "hub", "subtype": "",
                     "lat": float(lat), "lng": float(lng), "commodity": rm["productCode"],
                     "supply":0, "capacity": rm["availableSupply"],
                     "cost": 0, "yield": 0, "demand": 0, "price": 0, "network_id": network_id
@@ -399,9 +402,11 @@ async def poll_requests():
                         bmc_name = master_dict.get(b_code, {}).get('name', b_code)
                         supp_name = master_dict.get(supplier_code, {}).get('name', supplier_code)
                         
+                        bmc_node_id = f"{supplier_code}_{b_code}" if supplier_code else b_code
+                        
                         mapping_list.append({
                             "PlantCode": p_code, "Plant": plant_name, "Supplier": supp_name, "SupplierCode": supplier_code,
-                            "BMCCode": b_code, "BMC": bmc_name, "commodity": m["productCode"]
+                            "BMCCode": bmc_node_id, "BMC": bmc_name, "commodity": m["productCode"]
                         })
             
             unique_suppliers = list(set(m["supplierCode"] for m in req_mmcs))
@@ -416,8 +421,11 @@ async def poll_requests():
                         p_code_str = str(p_code)
                         route = f"{b_code_str}-{p_code_str}"
                         dist = math.ceil(dist_dict.get(route, 0.0))
+                        
+                        bmc_node_id = f"{s_code}_{b_code_str}" if s_code else b_code_str
+                        
                         dist_list.append({
-                            "BMC Code": b_code_str, "Plant Code": p_code_str, "Distance": dist,
+                            "BMC Code": bmc_node_id, "Plant Code": p_code_str, "Distance": dist,
                             "Supplier": supp_name, "Supplier Code": str(s_code), "Remark": ""
                         })
                         
