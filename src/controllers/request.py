@@ -38,7 +38,7 @@ async def get_requests_by_date(start_date: datetime, end_date: datetime):
 async def get_request_result(jobId: str):
     try:
         
-        jobId='REQ0046'
+        #jobId='REQ0046'
         from src.repositories.result import OptimizerRequestResultRepository
         repo = OptimizerRequestResultRepository()
         
