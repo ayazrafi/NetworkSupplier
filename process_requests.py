@@ -197,13 +197,14 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
                 
-            # Format 5: Supplier, BMCCode, ProductType, flow, distance, trips (basis of BMCCode, ProductType)
-            g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'Product / Milk Type'])
-            for (supp, bmc, prod), group in g5:
+            # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips
+            g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'To Node ID', 'Product / Milk Type'])
+            for (supp, bmc, plant, prod), group in g5:
                 actual_bmc = str(bmc).split('_')[-1] if '_' in str(bmc) else str(bmc)
                 format_5.append({
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
                     "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, ""),
+                    "PlantCode": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
                     "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
                     "TotalDistance": float(group['Distance (km)'].sum()),
