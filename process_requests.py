@@ -197,6 +197,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
                 
+                
             # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips
             g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'To Node ID', 'Product / Milk Type'])
             for (supp, bmc, plant, prod), group in g5:
