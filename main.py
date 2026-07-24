@@ -92,11 +92,8 @@ async def lifespan(app: FastAPI):
     await seed_admin_on_startup()
     
     # 3. Start Background Job processor worker
-    if os.environ.get("job", "false").lower() == "true":
-        logger.info("Starting background request processor...")
-        app.state.process_requests_task = asyncio.create_task(poll_requests())
-    else:
-        logger.info("Background request processor is disabled (job != true).")
+    logger.info("Starting background request processor (will pause if job=false in .env)...")
+    app.state.process_requests_task = asyncio.create_task(poll_requests())
 
     logger.info("Lifespan setup completed successfully.")
     

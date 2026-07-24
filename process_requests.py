@@ -315,9 +315,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         print(f"Error parsing/saving results for {request_id}: {e}")
 
 async def poll_requests():
-    if not Environment.JOB_ID:
-        print("JOB_ID is not set to true in .env. Background worker will not run.")
-        return
+    # Environment.JOB_ID check removed so that the task can start and pause dynamically
         
     await DatabaseConnection.connect()
     
@@ -329,9 +327,23 @@ async def poll_requests():
     mapping_repo = RequestPlantSupplierMappingRepository()
     
     print("Background worker started. Polling for pending requests...")
+    is_paused = False
     
     while True:
         try:
+            from dotenv import load_dotenv
+            import os
+            load_dotenv(override=True)
+            if str(os.getenv("job", "false")).lower() != "true":
+                if not is_paused:
+                    print("job=false detected in .env. Background worker paused.")
+                    is_paused = True
+                await asyncio.sleep(5)
+                continue
+                
+            if is_paused:
+                print("job=true detected in .env. Background worker resumed.")
+                is_paused = False
             pending_req = await opt_repo.collection.find_one_and_update(
                 {"status": "Pending"},
                 {"$set": {"status": "InProgress", "startedOn": datetime.utcnow()}}
