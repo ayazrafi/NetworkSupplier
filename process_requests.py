@@ -331,12 +331,12 @@ async def poll_requests():
     
     while True:
         try:
-            from dotenv import load_dotenv
-            import os
-            load_dotenv(override=True)
-            if str(os.getenv("job", "false")).lower() != "true":
+            from dotenv import dotenv_values
+            env_vars = dotenv_values(".env")
+            job_val = env_vars.get("JOB", env_vars.get("job", "false"))
+            if str(job_val).lower() != "true":
                 if not is_paused:
-                    print("job=false detected in .env. Background worker paused.")
+                    print(f"Job disabled in .env (value={job_val}). Background worker paused.")
                     is_paused = True
                 await asyncio.sleep(5)
                 continue
