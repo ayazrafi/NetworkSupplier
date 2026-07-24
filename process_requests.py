@@ -196,7 +196,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "Distance": float(group['Distance (km)'].sum()),
                     "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
                 })
-                
+
                 
             # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips
             g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'To Node ID', 'Product / Milk Type'])
@@ -307,6 +307,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         result_doc = sanitize_for_mongo(result_doc)
         await results_repo.collection.insert_one(result_doc)
         print(f"Saved DB records for {request_id}")
+        
         
     except Exception as e:
         import traceback
