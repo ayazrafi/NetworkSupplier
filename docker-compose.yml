@@ -13,3 +13,4 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./outputs:/app/outputs
+      - ./.env:/app/.env:ro
