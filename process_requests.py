@@ -100,17 +100,32 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         # Parse data formats
         result_doc = {"jobId": request_id, "createdAt": datetime.utcnow()}
         
+        # Helper to normalize codes (e.g., handles float values like '101.0' -> '101' and whitespace)
+        def norm_code(val):
+            if val is None or pd.isna(val):
+                return ""
+            s = str(val).strip()
+            if s.endswith(".0"):
+                s = s[:-2]
+            return s
+
         # Fetch supplier milk summary data
         milk_summary_data = fetch_supplier_milk_summary(request_id)
+        print(f"[milk_summary] Received {len(milk_summary_data)} summary records from API for jobId={request_id}")
         
         # Aggregate milk summary data by (supplier_code, plant_code, milk_type)
         milk_summary_agg = {}
         for row in milk_summary_data:
-            key = (str(row.get('supplier_code')), str(row.get('plant_code')), str(row.get('milk_type')).upper())
+            s_code = norm_code(row.get('supplier_code', row.get('supplierCode', row.get('SupplierCode'))))
+            p_code = norm_code(row.get('plant_code', row.get('plantCode', row.get('PlantCode'))))
+            m_type = norm_code(row.get('milk_type', row.get('milkType', row.get('commodity', '')))).upper()
+            
+            key = (s_code, p_code, m_type)
             if key not in milk_summary_agg:
                 milk_summary_agg[key] = {'quantity': 0.0, 'noOftrips': 0}
-            milk_summary_agg[key]['quantity'] += float(row.get('quantity', 0.0))
-            milk_summary_agg[key]['noOftrips'] += int(row.get('noOftrips', 0))
+            milk_summary_agg[key]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
+            milk_summary_agg[key]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
+        print(f"[milk_summary] Aggregated keys available: {list(milk_summary_agg.keys())}")
         
         def safe_val(v):
             return 0 if pd.isna(v) else v
@@ -212,9 +227,11 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             for (supp, plant, prod), group in g4:
                 dist = float(group['Distance (km)'].sum())
                 
-                # Retrieve before quantities from the API data
-                key = (str(supp), str(plant), str(prod).upper())
+                # Retrieve before quantities from the API data using normalized keys
+                key = (norm_code(supp), norm_code(plant), norm_code(prod).upper())
                 api_q = milk_summary_agg.get(key, {'quantity': 0.0, 'noOftrips': 0})
+                if key not in milk_summary_agg:
+                    print(f"[milk_summary mismatch] No match for route key {key}. Available keys: {list(milk_summary_agg.keys())}")
                 before_quantity = api_q['quantity']
                 before_nooftrip = api_q['noOftrips']
                 before_distance = dist * before_nooftrip
