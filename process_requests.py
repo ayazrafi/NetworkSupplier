@@ -41,6 +41,16 @@ def fetch_distance_data():
         print(f"Error fetching distance data: {e}")
         return []
 
+def fetch_supplier_milk_summary(job_id):
+    try:
+        with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
+            r = client.post('https://apinode1.secutrak.in/mobileApiDairyM/getSupplierMilkSummary', data={"AccessToken":"40Y8h3xcr3nGBOQ154d154PH23mSj770", "jobId": job_id})
+            return r.json().get('data', [])
+    except Exception as e:
+        print(f"Error fetching supplier milk summary: {e}")
+        return []
+
+
 async def process_excel_and_save(request_id, excel_path, master_dict):
     results_repo = OptimizerRequestResultRepository()
     
@@ -89,6 +99,18 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             
         # Parse data formats
         result_doc = {"jobId": request_id, "createdAt": datetime.utcnow()}
+        
+        # Fetch supplier milk summary data
+        milk_summary_data = fetch_supplier_milk_summary(request_id)
+        
+        # Aggregate milk summary data by (supplier_code, plant_code, milk_type)
+        milk_summary_agg = {}
+        for row in milk_summary_data:
+            key = (str(row.get('supplier_code')), str(row.get('plant_code')), str(row.get('milk_type')).upper())
+            if key not in milk_summary_agg:
+                milk_summary_agg[key] = {'quantity': 0.0, 'noOftrips': 0}
+            milk_summary_agg[key]['quantity'] += float(row.get('quantity', 0.0))
+            milk_summary_agg[key]['noOftrips'] += int(row.get('noOftrips', 0))
         
         def safe_val(v):
             return 0 if pd.isna(v) else v
@@ -188,13 +210,25 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             # Format 4: Supplier, Plant, ProductType, sum of flow, sum of Distance, no of trips (basis of supplier, plant, product)
             g4 = df_routes.groupby(['SupplierCode', 'To Node ID', 'Product / Milk Type'])
             for (supp, plant, prod), group in g4:
+                dist = float(group['Distance (km)'].sum())
+                
+                # Retrieve before quantities from the API data
+                key = (str(supp), str(plant), str(prod).upper())
+                api_q = milk_summary_agg.get(key, {'quantity': 0.0, 'noOftrips': 0})
+                before_quantity = api_q['quantity']
+                before_nooftrip = api_q['noOftrips']
+                before_distance = dist * before_nooftrip
+                
                 format_4.append({
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
                     "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
-                    "Distance": float(group['Distance (km)'].sum()),
-                    "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
+                    "Distance": dist,
+                    "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0,
+                    "beforeQuantity": before_quantity,
+                    "beforeDistance": before_distance,
+                    "beforeNoofTrip": before_nooftrip
                 })
 
                 
