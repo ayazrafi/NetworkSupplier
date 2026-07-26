@@ -44,7 +44,7 @@ def fetch_distance_data():
 def fetch_supplier_milk_summary(job_id):
     try:
         with httpx.Client(timeout=httpx.Timeout(30.0)) as client:
-            r = client.post('https://apinode1.secutrak.in/mobileApiDairyM/getSupplierMilkSummary', data={"AccessToken":"40Y8h3xcr3nGBOQ154d154PH23mSj770", "jobId": job_id})
+            r = client.post('https://apinode1.secutrak.in/mobileApiDairyM/getSupplierMilkSummary', json={"AccessToken":"40Y8h3xcr3nGBOQ154d154PH23mSj770", "jobId": job_id})
             return r.json().get('data', [])
     except Exception as e:
         print(f"Error fetching supplier milk summary: {e}")
