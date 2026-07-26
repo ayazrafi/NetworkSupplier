@@ -113,9 +113,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         milk_summary_data = fetch_supplier_milk_summary(request_id)
         print(f"[milk_summary] Received {len(milk_summary_data)} summary records from API for jobId={request_id}")
         
-        # Aggregate milk summary data by (supplier_code, plant_code, milk_type) and by BMC if available
+        # Aggregate milk summary data by (supplier_code, plant_code, milk_type), by BMC, and by Plant-Product
         milk_summary_agg = {}
         bmc_milk_summary_agg = {}
+        plant_milk_summary_agg = {}
         for row in milk_summary_data:
             s_code = norm_code(row.get('supplier_code', row.get('supplierCode', row.get('SupplierCode'))))
             p_code = norm_code(row.get('plant_code', row.get('plantCode', row.get('PlantCode'))))
@@ -130,6 +131,12 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 milk_summary_agg[key3] = {'quantity': 0.0, 'noOftrips': 0}
             milk_summary_agg[key3]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
             milk_summary_agg[key3]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
+
+            key2 = (p_code, m_type)
+            if key2 not in plant_milk_summary_agg:
+                plant_milk_summary_agg[key2] = {'quantity': 0.0, 'noOftrips': 0}
+            plant_milk_summary_agg[key2]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
+            plant_milk_summary_agg[key2]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
             
             if b_code:
                 key4 = (s_code, b_code, p_code, m_type)
@@ -304,15 +311,26 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                         d6[prod] += float(r.get('Dispatch Quantity', 0.0))
                 format_6.append(d6)
                 
-            # Format 7: Plant, ProductType, Flow Quantity, TotalDistance, Total No.of Trips
+            # Format 7: Plant, ProductType, Flow Quantity, TotalDistance, Total No.of Trips, before quantities
             g7 = df_routes.groupby(['To Node ID', 'Product / Milk Type'])
             for (plant, prod), group in g7:
+                dist = float(group['Distance (km)'].sum())
+                key2 = (norm_code(plant), norm_code(prod).upper())
+                api_q = plant_milk_summary_agg.get(key2, {'quantity': 0.0, 'noOftrips': 0})
+                
+                before_quantity = api_q['quantity']
+                before_nooftrip = api_q['noOftrips']
+                before_distance = dist * before_nooftrip
+
                 format_7.append({
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
                     "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
-                    "TotalDistance": float(group['Distance (km)'].sum()),
-                    "Total No.of Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
+                    "TotalDistance": dist,
+                    "Total No.of Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0,
+                    "beforeQuantity": before_quantity,
+                    "beforeDistance": before_distance,
+                    "beforeNoofTrip": before_nooftrip
                 })
                 
             # Format 8: supplierCode, supplierName, ProductCode, Dispatch Quantity, V07...V35
