@@ -113,18 +113,30 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         milk_summary_data = fetch_supplier_milk_summary(request_id)
         print(f"[milk_summary] Received {len(milk_summary_data)} summary records from API for jobId={request_id}")
         
-        # Aggregate milk summary data by (supplier_code, plant_code, milk_type)
+        # Aggregate milk summary data by (supplier_code, plant_code, milk_type) and by BMC if available
         milk_summary_agg = {}
+        bmc_milk_summary_agg = {}
         for row in milk_summary_data:
             s_code = norm_code(row.get('supplier_code', row.get('supplierCode', row.get('SupplierCode'))))
             p_code = norm_code(row.get('plant_code', row.get('plantCode', row.get('PlantCode'))))
             m_type = norm_code(row.get('milk_type', row.get('milkType', row.get('commodity', '')))).upper()
+            b_code_raw = row.get('bmc_code', row.get('bmcCode', row.get('BMCCode', row.get('hub_code', row.get('fromNode', row.get('from_node_id', ''))))))
+            b_code = norm_code(b_code_raw)
+            if '_' in b_code:
+                b_code = b_code.split('_')[-1]
             
-            key = (s_code, p_code, m_type)
-            if key not in milk_summary_agg:
-                milk_summary_agg[key] = {'quantity': 0.0, 'noOftrips': 0}
-            milk_summary_agg[key]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
-            milk_summary_agg[key]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
+            key3 = (s_code, p_code, m_type)
+            if key3 not in milk_summary_agg:
+                milk_summary_agg[key3] = {'quantity': 0.0, 'noOftrips': 0}
+            milk_summary_agg[key3]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
+            milk_summary_agg[key3]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
+            
+            if b_code:
+                key4 = (s_code, b_code, p_code, m_type)
+                if key4 not in bmc_milk_summary_agg:
+                    bmc_milk_summary_agg[key4] = {'quantity': 0.0, 'noOftrips': 0}
+                bmc_milk_summary_agg[key4]['quantity'] += float(row.get('quantity', row.get('Quantity', 0.0)))
+                bmc_milk_summary_agg[key4]['noOftrips'] += int(row.get('noOftrips', row.get('noOfTrips', row.get('no_of_trips', 0))))
         print(f"[milk_summary] Aggregated keys available: {list(milk_summary_agg.keys())}")
         
         def safe_val(v):
@@ -249,18 +261,32 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 })
 
                 
-            # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips
+            # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips, before quantities
             g5 = df_routes.groupby(['SupplierCode', 'From Node ID', 'To Node ID', 'Product / Milk Type'])
             for (supp, bmc, plant, prod), group in g5:
                 actual_bmc = str(bmc).split('_')[-1] if '_' in str(bmc) else str(bmc)
+                dist = float(group['Distance (km)'].sum())
+                
+                # Retrieve before quantities (prefer BMC-specific key if available from API, otherwise fallback to Supplier-Plant summary)
+                key4 = (norm_code(supp), norm_code(actual_bmc), norm_code(plant), norm_code(prod).upper())
+                key3 = (norm_code(supp), norm_code(plant), norm_code(prod).upper())
+                api_q = bmc_milk_summary_agg.get(key4, milk_summary_agg.get(key3, {'quantity': 0.0, 'noOftrips': 0}))
+                
+                before_quantity = api_q['quantity']
+                before_nooftrip = api_q['noOftrips']
+                before_distance = dist * before_nooftrip
+
                 format_5.append({
                     "Supplier": supp, "SupplierName": api_dict.get(str(supp), ""),
                     "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, ""),
                     "PlantCode": plant, "PlantName": api_dict.get(str(plant), ""),
                     "ProductType": prod,
                     "Dispatch Quantity": float(group['Dispatch Quantity'].sum()) if 'Dispatch Quantity' in group else 0.0,
-                    "TotalDistance": float(group['Distance (km)'].sum()),
-                    "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0
+                    "TotalDistance": dist,
+                    "Total Trips": int(group['Total Vehicles'].sum()) if 'Total Vehicles' in group else 0,
+                    "beforeQuantity": before_quantity,
+                    "beforeDistance": before_distance,
+                    "beforeNoofTrip": before_nooftrip
                 })
                 
             # Format 6: Plant, BMCCode, all product name keys
