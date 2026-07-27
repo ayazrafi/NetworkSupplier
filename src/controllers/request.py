@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException, status
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, status, Body, Query
+from typing import Dict, Any, Optional
 from datetime import datetime
 from src.models.request import RequestCreateInput, OptimizationRequestResponse
 from src.services.request import RequestService
@@ -54,5 +54,33 @@ async def get_request_result(jobId: str):
             "message": "Result fetched successfully",
             "data": result
         }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/{jobId}/status", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+@router.patch("/{jobId}/status", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+@router.put("/{jobId}", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+@router.patch("/{jobId}", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+async def update_request_status(
+    jobId: str,
+    status_query: Optional[str] = Query(None, alias="status"),
+    body: Optional[Dict[str, Any]] = Body(None)
+):
+    try:
+        new_status = status_query
+        if not new_status and body and "status" in body:
+            new_status = str(body["status"])
+            
+        if not new_status:
+            raise ValueError("Status parameter or JSON body containing 'status' is required")
+            
+        updated = await request_service.update_request_status(jobId, new_status)
+        return {
+            "success": True,
+            "message": "Request status updated successfully",
+            "data": updated
+        }
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

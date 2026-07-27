@@ -470,7 +470,7 @@ async def poll_requests():
             master_dict = {str(d.get('code')): d for d in master_data}
             
             distances_data = fetch_distance_data()
-            dist_dict = {str(d.get('route_code')): float(d.get('distance', 0)) for d in distances_data}
+            dist_dict = {str(d.get('route_code', '')).strip(): float(d.get('distance', 0)) for d in distances_data}
             
             nodes = []
             for rp in req_plants:
@@ -539,8 +539,8 @@ async def poll_requests():
                 
                 for b_code in supplier_bmcs:
                     for p_code in supplier_plants:
-                        b_code_str = str(b_code)
-                        p_code_str = str(p_code)
+                        b_code_str = str(b_code).strip()
+                        p_code_str = str(p_code).strip()
                         route = f"{b_code_str}-{p_code_str}"
                         dist = math.ceil(dist_dict.get(route, 0.0))
                         

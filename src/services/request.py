@@ -138,3 +138,26 @@ class RequestService:
                     except (ValueError, TypeError):
                         pass
         return results
+
+    async def update_request_status(self, job_id: str, new_status: str) -> Dict[str, Any]:
+        query = {"$or": [{"requestId": job_id}, {"jobId": job_id}]}
+        existing = await self.opt_repository.collection.find_one(query)
+        if not existing:
+            raise KeyError(f"Request not found for jobId: {job_id}")
+            
+        update_doc = {"$set": {"status": new_status}}
+        if "error" in existing:
+            update_doc["$set"]["error"] = {} if isinstance(existing.get("error"), dict) else ""
+            
+        updated = await self.opt_repository.collection.find_one_and_update(
+            query,
+            update_doc,
+            return_document=ReturnDocument.AFTER
+        )
+        if updated:
+            for k, v in list(updated.items()):
+                if isinstance(v, ObjectId):
+                    updated[k] = str(v)
+            if "createdOn" in updated and isinstance(updated["createdOn"], datetime):
+                updated["createdOn"] = updated["createdOn"] + timedelta(hours=5, minutes=30)
+        return updated
