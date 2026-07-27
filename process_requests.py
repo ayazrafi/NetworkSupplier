@@ -95,6 +95,13 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 df_routes = df_routes[df_routes['Status'].astype(str).str.upper() == 'ACTIVE'].copy()
         else:
             df_routes = pd.DataFrame()
+            
+        if 'Total Supply (Max Util)' in sheet_names:
+            df_total_supply = pd.read_excel(xls, 'Total Supply (Max Util)')
+            if 'Status' in df_total_supply.columns:
+                df_total_supply = df_total_supply[df_total_supply['Status'].astype(str).str.upper() == 'ACTIVE'].copy()
+        else:
+            df_total_supply = pd.DataFrame()
         xls.close()
         
         if not df_veh.empty:
@@ -227,31 +234,30 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 format_3.append(veh_data)
         result_doc['supplierVehicles'] = format_3
         
-        # 4, 5, 6, 7, 8 from 'Routes (Max Utilized)'
+        def map_product(prod):
+            prod_upper = str(prod).upper().strip()
+            if prod_upper == 'BM TO FCM':
+                return 'FCM'
+            elif prod_upper == 'FCM TO MM' or prod_upper == 'BM TO MM':
+                return 'MM'
+            return prod
+
+        # Format 4 from 'Total Supply (Max Util)'
         format_4 = []
-        format_5 = []
-        format_6 = []
-        format_7 = []
-        format_8 = []
-        if not df_routes.empty:
-            df_routes['From Node ID'] = df_routes['From Node ID'].astype(str)
-            df_routes['To Node ID'] = df_routes['To Node ID'].astype(str)
-            df_routes['SupplierCode'] = df_routes['From Node ID'].map(bmc_supp_code_map)
-            df_routes['SupplierName'] = df_routes['From Node ID'].map(bmc_supp_map)
-            
-            def map_product(prod):
-                prod_upper = str(prod).upper().strip()
-                if prod_upper == 'BM TO FCM':
-                    return 'FCM'
-                elif prod_upper == 'FCM TO MM' or prod_upper == 'BM TO MM':
-                    return 'MM'
-                return prod
-            df_routes['Product / Milk Type'] = df_routes['Product / Milk Type'].apply(map_product)
-            
-            # Format 4: Supplier, Plant, ProductType, sum of flow, sum of Distance, no of trips (basis of supplier, plant, product)
-            g4 = df_routes.groupby(['SupplierCode', 'To Node ID', 'Product / Milk Type'])
+        if not df_total_supply.empty:
+            df_total_supply['From Node ID'] = df_total_supply['From Node ID'].astype(str)
+            df_total_supply['To Node ID'] = df_total_supply['To Node ID'].astype(str)
+            df_total_supply['SupplierCode'] = df_total_supply['From Node ID'].map(bmc_supp_code_map)
+            df_total_supply['SupplierName'] = df_total_supply['From Node ID'].map(bmc_supp_map)
+            prod_col = 'Base Milk' if 'Base Milk' in df_total_supply.columns else 'Product / Milk Type'
+            if prod_col in df_total_supply.columns:
+                df_total_supply['Product / Milk Type'] = df_total_supply[prod_col].apply(map_product)
+            else:
+                df_total_supply['Product / Milk Type'] = ''
+                
+            g4 = df_total_supply.groupby(['SupplierCode', 'To Node ID', 'Product / Milk Type'])
             for (supp, plant, prod), group in g4:
-                dist = float(group['Distance (km)'].sum())
+                dist = float(group['Total Distance'].sum()) if 'Total Distance' in group else float(group['Distance (km)'].sum()) if 'Distance (km)' in group else 0.0
                 
                 # Retrieve before quantities from the API data using normalized keys
                 key = (norm_code(supp), norm_code(plant), norm_code(prod).upper())
@@ -273,6 +279,18 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                     "beforeDistance": before_distance,
                     "beforeNoofTrip": before_nooftrip
                 })
+
+        # 5, 6, 7, 8 from 'Routes (Max Utilized)'
+        format_5 = []
+        format_6 = []
+        format_7 = []
+        format_8 = []
+        if not df_routes.empty:
+            df_routes['From Node ID'] = df_routes['From Node ID'].astype(str)
+            df_routes['To Node ID'] = df_routes['To Node ID'].astype(str)
+            df_routes['SupplierCode'] = df_routes['From Node ID'].map(bmc_supp_code_map)
+            df_routes['SupplierName'] = df_routes['From Node ID'].map(bmc_supp_map)
+            df_routes['Product / Milk Type'] = df_routes['Product / Milk Type'].apply(map_product)
 
                 
             # Format 5: Supplier, BMCCode, PlantCode, ProductType, flow, distance, trips, before quantities
