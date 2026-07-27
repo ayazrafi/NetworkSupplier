@@ -16,7 +16,6 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 
-
 def parse_excel_nodes(file_path_or_df):
     if isinstance(file_path_or_df, pd.DataFrame):
         df = file_path_or_df
@@ -134,6 +133,7 @@ def parse_excel_nodes(file_path_or_df):
         nodes.append(node)
     return nodes
 
+
 # Helper to determine raw milk type from finished product type
 def get_milk_type_for_product(product_type):
     ptype = (product_type or '').strip()
@@ -144,13 +144,13 @@ def get_milk_type_for_product(product_type):
         return 'Buffalo Milk'
     return 'Cow Milk'
 
+
 # Helper to serialize MongoDB object
 def serialize_node(node):
     node_dict = dict(node)
     if '_id' in node_dict:
         node_dict['_id'] = str(node_dict['_id'])
     return node_dict
-
 
 
 def get_optimal_vehicles(flow, vehicle_limits, caps=None, caps_ranges=None, **kwargs):
@@ -840,29 +840,6 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
     if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
         routes = []
 
-        # Pre-calculate actual substitutions per plant
-        plant_subs = {}
-        for p in plants:
-            pid = p['id']
-            bm_to_fcm = trans_vars[(pid, 'BM_to_FCM')].solution_value() if 'trans_vars' in locals() and (pid, 'BM_to_FCM') in trans_vars else 0.0
-            fcm_to_mm = trans_vars[(pid, 'FCM_to_MM')].solution_value() if 'trans_vars' in locals() and (pid, 'FCM_to_MM') in trans_vars else 0.0
-            
-            # calculate inflows
-            bm_inflow = sum(flow_h_p[(h['id'], pid, _m)].solution_value() for h in hubs for _m in milk_types if (h['id'], pid, _m) in flow_h_p and ('buffalo' in str(_m).lower() or 'bm' in str(_m).lower()))
-            fcm_inflow = sum(flow_h_p[(h['id'], pid, _m)].solution_value() for h in hubs for _m in milk_types if (h['id'], pid, _m) in flow_h_p and 'fcm' in str(_m).lower())
-            
-            fcm_cascaded = min(fcm_to_mm, fcm_inflow) if fcm_inflow > 0 else 0.0
-            bm_cascaded_to_mm = max(0, fcm_to_mm - fcm_inflow)
-            bm_cascaded_to_fcm = max(0, bm_to_fcm - bm_cascaded_to_mm)
-            
-            plant_subs[pid] = {
-                'BM_inflow': bm_inflow,
-                'FCM_inflow': fcm_inflow,
-                'BM_to_FCM_actual': bm_cascaded_to_fcm,
-                'BM_to_MM_actual': bm_cascaded_to_mm,
-                'FCM_to_MM_actual': fcm_cascaded
-            }
-
         # Extract Hub -> Plant flows
         for (h_id, p_id, m), flow_var in flow_h_p.items():
             val = round(flow_var.solution_value())
@@ -893,79 +870,24 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                 vehicle_rates = {'V07': 38, 'V10': 42, 'V12': 46, 'V15': 52, 'V20': 60, 'V25': 68, 'V30': 75, 'V35': 85}
                 cost = sum(trips * dist * vehicle_rates.get(v_type, 0) for v_type, trips in optimal_veh.items())
                 
-                primary_flow = float(val)
-                extra_flows = []
-                subs = plant_subs.get(p_id, {})
-                m_lower = str(m).lower()
-                
-                if ('buffalo' in m_lower or 'bm' in m_lower) and subs.get('BM_inflow', 0) > 0:
-                    prop = val / subs['BM_inflow']
-                    r_bm_to_fcm = prop * subs['BM_to_FCM_actual']
-                    r_bm_to_mm = prop * subs['BM_to_MM_actual']
-                    
-                    if plant_bmc_mapping and (str(p_id), str(h_id), "FCM") not in plant_bmc_mapping:
-                        r_bm_to_fcm = 0.0
-                    if plant_bmc_mapping and (str(p_id), str(h_id), "MM") not in plant_bmc_mapping:
-                        r_bm_to_mm = 0.0
-                        
-                    primary_flow -= (r_bm_to_fcm + r_bm_to_mm)
-                    if round(r_bm_to_fcm, 2) > 0:
-                        extra_flows.append((r_bm_to_fcm, "BM to FCM", "FCM"))
-                    if round(r_bm_to_mm, 2) > 0:
-                        extra_flows.append((r_bm_to_mm, "BM to MM", "MM"))
-                        
-                elif 'fcm' in m_lower and subs.get('FCM_inflow', 0) > 0:
-                    prop = val / subs['FCM_inflow']
-                    r_fcm_to_mm = prop * subs['FCM_to_MM_actual']
-                    
-                    if plant_bmc_mapping and (str(p_id), str(h_id), "MM") not in plant_bmc_mapping:
-                        r_fcm_to_mm = 0.0
-                        
-                    primary_flow -= r_fcm_to_mm
-                    if round(r_fcm_to_mm, 2) > 0:
-                        extra_flows.append((r_fcm_to_mm, "FCM to MM", "MM"))
-
-                if round(primary_flow, 2) > 0 or not extra_flows:
-                    route_dict = {
-                        'id': f"route_{h_id}_{p_id}_{clean_m}",
-                        'from_id': h_id,
-                        'to_id': p_id,
-                        'from_type': 'hub',
-                        'to_type': 'plant',
-                        'flow': round(primary_flow, 2),
-                        'product_type': m,
-                        'target_product_type': m,
-                        'unit': 'L',
-                        'distance': round(dist, 2),
-                        'cost': round(cost, 2),
-                        'total_vehicles': total_veh,
-                        'total_vehicle_capacity': total_cap,
-                        'excess_vehicle_capacity': round(excess, 2)
-                    }
-                    for v_type, trips in optimal_veh.items():
-                        route_dict[f'vehicles_{v_type}'] = trips
-                    routes.append(route_dict)
-                    
-                for ext_flow, ext_ptype, target_group in extra_flows:
-                    ext_route_dict = {
-                        'id': f"route_{h_id}_{p_id}_{clean_m}_extra_{ext_ptype.replace(' ', '_')}",
-                        'from_id': h_id,
-                        'to_id': p_id,
-                        'from_type': 'hub',
-                        'to_type': 'plant',
-                        'flow': round(ext_flow, 2),
-                        'product_type': ext_ptype,
-                        'target_product_type': target_group,
-                        'unit': 'L',
-                        'distance': round(dist, 2),
-                        'cost': 0.0,
-                        'total_vehicles': 0,
-                        'total_vehicle_capacity': 0,
-                        'excess_vehicle_capacity': 0.0
-                    }
-                    for v_type in vehicle_rates.keys():
-                        ext_route_dict[f'vehicles_{v_type}'] = 0
-                    routes.append(ext_route_dict)
+                route_dict = {
+                    'id': f"route_{h_id}_{p_id}_{clean_m}",
+                    'from_id': h_id,
+                    'to_id': p_id,
+                    'from_type': 'hub',
+                    'to_type': 'plant',
+                    'flow': round(val, 2),
+                    'product_type': m,
+                    'unit': 'L',
+                    'distance': round(dist, 2),
+                    'cost': round(cost, 2),
+                    'total_vehicles': total_veh,
+                    'total_vehicle_capacity': total_cap,
+                    'excess_vehicle_capacity': round(excess, 2)
+                }
+                for v_type, trips in optimal_veh.items():
+                    route_dict[f'vehicles_{v_type}'] = trips
+                routes.append(route_dict)
 
 
         # Aggregate metrics
@@ -1127,7 +1049,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     key = (r['from_id'], r['product_type'])
                     total_flow_from_bmc[key] = total_flow_from_bmc.get(key, 0.0) + r['flow']
 
-            # Separate Hub -> Plant routes
+            # Separate Hub -> Plant routes and sort them by cluster/subcluster and flow (descending)
             hub_routes = [r for r in res.get('routes', []) if r.get('from_type') == 'hub']
             
             # Helper to get cluster and subcluster for sorting and grouping
@@ -1138,22 +1060,11 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 sc = bmc_info.get('subcluster', '') if isinstance(bmc_info, dict) else ''
                 return (c, sc)
                 
-            from collections import defaultdict
-            grouped_hub_routes = defaultdict(list)
-            for r in hub_routes:
-                group_type = r.get('target_product_type', r['product_type'])
-                grouped_hub_routes[(r['from_id'], r['to_id'], group_type)].append(r)
-                
-            group_keys = list(grouped_hub_routes.keys())
-            group_keys.sort(key=lambda k: (get_subcluster_key(grouped_hub_routes[k][0]), -sum(r['flow'] for r in grouped_hub_routes[k])))
+            hub_routes.sort(key=lambda x: (get_subcluster_key(x), -x['flow']))
 
-            # Process Hub -> Plant route groups using sub-cluster pools and supply rules
-            for g_key in group_keys:
-                group = grouped_hub_routes[g_key]
-                group.sort(key=lambda r: 1 if '_extra_' in str(r.get('id', '')) else 0)
-                r_main = group[0]
-                
-                c, sc = get_subcluster_key(r_main)
+            # Process Hub -> Plant routes using sub-cluster pools and supply rules
+            for r in hub_routes:
+                c, sc = get_subcluster_key(r)
                 key = (c, sc)
                 
                 # Retrieve remaining sub-cluster vehicle pool
@@ -1162,28 +1073,53 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 })
                 
                 # Margins
-                supplier = bmc_to_supplier.get(r_main['from_id'], '')
+                supplier = bmc_to_supplier.get(r['from_id'], '')
                 bmc_info = vehicle_limits_map.get(supplier, {})
                 margin_low = bmc_info.get('margin_low', 5.0) if isinstance(bmc_info, dict) else 5.0
                 margin_high = bmc_info.get('margin_high', 5.0) if isinstance(bmc_info, dict) else 5.0
                 strategy = bmc_info.get('strategy', 'Least Vehicle Strategy') if isinstance(bmc_info, dict) else 'Least Vehicle Strategy'
                 
-                q = sum(r['flow'] for r in group)
+                # Margins for output columns
+                r['margin_low'] = margin_low
+                r['margin_high'] = margin_high
+                
+                # Min and max flow quantities
+                q = r['flow']
+                min_flow = q * (1.0 - margin_high / 100.0)
+                max_flow = q * (1.0 + margin_low / 100.0)
+                r['min_flow_quantity'] = min_flow
+                r['max_flow_quantity'] = max_flow
                 
                 # Left quantity on BMC
-                left_qty = bmc_capacities.get((r_main['from_id'], r_main['product_type']), 0.0) - total_flow_from_bmc.get((r_main['from_id'], r_main['product_type']), 0.0)
+                left_qty = bmc_capacities.get((r['from_id'], r['product_type']), 0.0) - total_flow_from_bmc.get((r['from_id'], r['product_type']), 0.0)
                 
                 # Temporary vehicle allocation
-                optimal_veh = get_optimal_vehicles(q, limits, caps=vehicle_limits_map.get('global_caps'), distance=r_main['distance'], strategy=strategy, margin=margin_high)
+                optimal_veh = get_optimal_vehicles(q, limits, caps=vehicle_limits_map.get('global_caps'), distance=r['distance'], strategy=strategy, margin=margin_high)
                 global_caps = vehicle_limits_map.get('global_caps', {})
+                for vc in global_caps.keys():
+                    r[f'vehicles_{vc}'] = optimal_veh.get(vc, 0)
                 total_veh = sum(optimal_veh.values())
                 total_cap = sum(count * global_caps.get(v, 0) for v, count in optimal_veh.items())
                 excess_qty = total_cap - q if total_veh > 0 else 0.0
                 
+                # ── Vehicle Dispatch Rule ───────────────────────────────────────────────
+                # When dispatching 1 or more vehicles, vehicles are loaded largest-first.
+                # All vehicles except the LAST are fully loaded (empty = 0).
+                # The LAST (partial) vehicle may have empty space — and that empty space
+                # CANNOT exceed LeaveQuantity (lq_val).
+                #
+                #   partial_vehicle_empty = total_cap - flow   (= excess_qty when ≥ 0)
+                #
+                # If the round-up result has excess_qty > lq_val → switch to round-DOWN:
+                #   All vehicles carry their full capacity (each empty = 0 ≤ lq_val ✓).
+                #   Any deficit (flow - total_cap) is left at the BMC.
+                # ────────────────────────────────────────────────────────────────────────
+
                 do_not_supply  = False
                 reason_override = None
-                per_veh_empty  = max(0.0, excess_qty)
+                per_veh_empty  = max(0.0, excess_qty)   # default: partial vehicle empty
 
+                # Determine last allocated vehicle (smallest capacity utilized)
                 lq_val = None
                 if optimal_veh:
                     global_caps = vehicle_limits_map.get('global_caps', {'7 L': 7000.0, '10 L': 10000.0, '12L': 12000.0, '15 L': 15000.0, '18 L': 18000.0, 'V30': 35000.0, 'V35': 35000.0})
@@ -1196,13 +1132,20 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                     reason_override = "No vehicles available in the sub-cluster pool"
 
                 elif lq_val is not None and excess_qty > lq_val and str(strategy).strip().lower() != 'least vehicle strategy':
+                    # The last (partial) vehicle would be too empty → switch to round-DOWN.
+                    # Round-down: maximise total capacity WITHOUT exceeding flow.
+                    # Result: every vehicle runs fully loaded (empty = 0 ≤ lq_val).
                     rd_veh = get_vehicles_round_down(q, limits, caps=vehicle_limits_map.get('global_caps'), strategy=strategy)
                     global_caps = vehicle_limits_map.get('global_caps', {})
                     rd_total_veh = sum(rd_veh.values())
                     rd_total_cap = sum(count * global_caps.get(v, 0) for v, count in rd_veh.items())
 
                     if rd_total_veh > 0:
+                        for vc in global_caps.keys():
+                            r[f'vehicles_{vc}'] = rd_veh.get(vc, 0)
+                        
                         optimal_veh = rd_veh
+                            
                         total_veh   = rd_total_veh
                         total_cap   = rd_total_cap
                         excess_qty  = rd_total_cap - q
@@ -1220,10 +1163,19 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                             f"Cannot supply: flow ({q:.0f} L) requires {min_cap:.0f} L vehicle but excess empty space exceeds {lq_val:.0f} L (15% rule)"
                         )
 
-                total_disp_qty = 0.0
+                # ── Apply decision ───────────────────────────────────────────────────────
                 if do_not_supply:
-                    total_disp_qty = 0.0
+                    global_caps = vehicle_limits_map.get('global_caps', {})
+                    for vc in global_caps.keys():
+                        r[f'vehicles_{vc}'] = 0
+                    r['total_vehicles']       = 0
+                    r['total_vehicle_capacity'] = 0.0
+                    r['excess_vehicle_capacity'] = 0.0
+                    r['per_vehicle_empty']    = 0.0
+                    r['vehicle_reason']       = reason_override
+                    r['dispatch_quantity']    = 0.0
                 else:
+                    # Build reason for the normal supply path (excess_qty ≤ lq_val)
                     if not reason_override:
                         if lq_val is not None:
                             reason_override = (
@@ -1232,51 +1184,20 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                             )
                         else:
                             reason_override = "Supplied"
-                    total_disp_qty = total_cap if total_cap < q else q
-                    
+
+                    r['total_vehicles']       = total_veh
+                    r['total_vehicle_capacity'] = total_cap
+                    r['excess_vehicle_capacity'] = round(excess_qty, 2)
+                    r['per_vehicle_empty']    = round(per_veh_empty, 2)
+                    r['vehicle_reason']       = reason_override
+                    r['dispatch_quantity']    = total_cap if total_cap < q else q
+
+                    # Decrement from pool
                     if key in subcluster_vehicle_pools:
                         for vc, count in optimal_veh.items():
                             if vc in subcluster_vehicle_pools[key]:
                                 subcluster_vehicle_pools[key][vc] -= count
-
-                # Apply to all routes in group
-                for idx, r in enumerate(group):
-                    r['margin_low'] = margin_low
-                    r['margin_high'] = margin_high
-                    r['min_flow_quantity'] = r['flow'] * (1.0 - margin_high / 100.0)
-                    r['max_flow_quantity'] = r['flow'] * (1.0 + margin_low / 100.0)
-                    
-                    if idx == 0:
-                        if do_not_supply:
-                            global_caps = vehicle_limits_map.get('global_caps', {})
-                            for vc in global_caps.keys():
-                                r[f'vehicles_{vc}'] = 0
-                            r['total_vehicles'] = 0
-                            r['total_vehicle_capacity'] = 0.0
-                            r['excess_vehicle_capacity'] = 0.0
-                            r['per_vehicle_empty'] = 0.0
-                            r['vehicle_reason'] = reason_override
-                            r['dispatch_quantity'] = 0.0
-                        else:
-                            global_caps = vehicle_limits_map.get('global_caps', {})
-                            for vc in global_caps.keys():
-                                r[f'vehicles_{vc}'] = optimal_veh.get(vc, 0)
-                            r['total_vehicles'] = total_veh
-                            r['total_vehicle_capacity'] = total_cap
-                            r['excess_vehicle_capacity'] = round(excess_qty, 2)
-                            r['per_vehicle_empty'] = round(per_veh_empty, 2)
-                            r['vehicle_reason'] = reason_override
-                            r['dispatch_quantity'] = (r['flow'] / q) * total_disp_qty if q > 0 else 0.0
-                    else:
-                        global_caps = vehicle_limits_map.get('global_caps', {})
-                        for vc in global_caps.keys():
-                            r[f'vehicles_{vc}'] = 0
-                        r['total_vehicles'] = 0
-                        r['total_vehicle_capacity'] = 0.0
-                        r['excess_vehicle_capacity'] = 0.0
-                        r['per_vehicle_empty'] = 0.0
-                        r['vehicle_reason'] = "Handled by Primary Row"
-                        r['dispatch_quantity'] = (r['flow'] / q) * total_disp_qty if q > 0 else 0.0
+            # For non-hub routes, add default columns
             for r in res.get('routes', []):
                 if r.get('from_type') != 'hub':
                     global_caps = vehicle_limits_map.get('global_caps', {})
@@ -1472,42 +1393,104 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 # Default primary row values
                 primary_flow = r['flow']
                 extra_flows = [] # List of tuples: (flow, product_type, reason)
+                
+                if r['to_type'] == 'plant' and r['to_id'] in plant_subs:
+                    subs = plant_subs[r['to_id']]
+                    
+                    if ('buffalo' in ptype_lower or 'bm' in ptype_lower) and subs['BM_inflow'] > 0:
+                        prop = r['flow'] / subs['BM_inflow']
+                        r_bm_to_fcm = prop * subs['BM_to_FCM_actual']
+                        r_bm_to_mm = prop * subs['BM_to_MM_actual']
+                        
+                        primary_flow -= (r_bm_to_fcm + r_bm_to_mm)
+                        if round(r_bm_to_fcm, 2) > 0:
+                            extra_flows.append((r_bm_to_fcm, f"{ptype} to FCM", "Optimal Flow (Substituted to FCM)"))
+                        if round(r_bm_to_mm, 2) > 0:
+                            extra_flows.append((r_bm_to_mm, f"{ptype} to MM", "Optimal Flow (Substituted to MM)"))
+                            
+                    elif 'fcm' in ptype_lower and subs['FCM_inflow'] > 0:
+                        prop = r['flow'] / subs['FCM_inflow']
+                        r_fcm_to_mm = prop * subs['FCM_to_MM_actual']
+                        
+                        primary_flow -= r_fcm_to_mm
+                        if round(r_fcm_to_mm, 2) > 0:
+                            extra_flows.append((r_fcm_to_mm, f"{ptype} to MM", "Optimal Flow (Substituted to MM)"))
+                
                 # Append primary row
-                routes_data.append({
-                    'Route ID': r['id'],
-                    'From Node ID': r['from_id'],
-                    'From Name': from_node.get('name', 'Unknown'),
-                    'From Type': r['from_type'],
-                    'From Latitude': from_node.get('lat'),
-                    'From Longitude': from_node.get('lng'),
-                    'To Node ID': r['to_id'],
-                    'To Name': to_node.get('name', 'Unknown'),
-                    'To Type': r['to_type'],
-                    'To Latitude': to_node.get('lat'),
-                    'To Longitude': to_node.get('lng'),
-                    'Product / Milk Type': ptype,
-                    'Flow': max(0.0, round(primary_flow, 2)),
-                    'Dispatch Quantity': max(0.0, round(primary_flow * (r.get('dispatch_quantity', 0.0) / r['flow']) if r.get('flow', 0) > 0 else 0.0, 2)),
-                    'Unit': r['unit'],
-                    'Distance (km)': r['distance'],
-                    'Transport Cost (₹)': r['cost'],
-                    'Status': 'ACTIVE',
-                    'Reason': 'Converted Flow' if '_extra_' in r['id'] else 'Optimal Flow',
-                    'Detailed Reason': 'Substituted internally at plant.' if '_extra_' in r['id'] else (f'Optimized for minimal transport cost (Dist: {r["distance"]} km) and even percentage balancing.' if r['from_type'] == 'hub' else f'Optimized to fulfill {ptype} market demand (Dist: {r["distance"]} km).'),
-                    **{f'{vc} Vehicles': r.get(f'vehicles_{vc}', 0) for vc in vehicle_limits_map.get('global_caps', {}).keys()},
-                    'Total Vehicles': r.get('vehicles_total', 0) if 'vehicles_total' in r else r.get('total_vehicles', 0),
-                    'Total Vehicle Capacity (L)': r.get('capacity_total', 0) if 'capacity_total' in r else r.get('total_vehicle_capacity', 0),
-                    'Excess Vehicle Capacity (L)': r.get('capacity_excess', 0) if 'capacity_excess' in r else r.get('excess_vehicle_capacity', 0),
-                    'VehicleReason': r.get('vehicle_reason', 'Optimal'),
-                    'SupplierCluster': cluster,
-                    'SupplierSubCluster': subcluster,
-                    'Strategy': strategy,
-                    'FlowLowMarginPercentage': bmc_info.get('margin_low', 0.0) if isinstance(bmc_info, dict) else 5.0,
-                    'FlowHighMarginPercentage': bmc_info.get('margin_high', 0.0) if isinstance(bmc_info, dict) else 5.0,
-                    'MinimumFlowQuantity': bmc_info.get('min_flow', 0.0) if isinstance(bmc_info, dict) else 0.0,
-                    'MaximumFlowQuantity': bmc_info.get('max_flow', 0.0) if isinstance(bmc_info, dict) else 0.0,
-                    'Mapping Exists': 'Yes' if (str(r['from_id']), str(r['to_id']), str(r.get('target_product_type', ptype))) in valid_route_tuples else 'No'
-                })
+                if round(primary_flow, 2) > 0 or not extra_flows:
+                    routes_data.append({
+                        'Route ID': r['id'],
+                        'From Node ID': r['from_id'],
+                        'From Name': from_node.get('name', 'Unknown'),
+                        'From Type': r['from_type'],
+                        'From Latitude': from_node.get('lat'),
+                        'From Longitude': from_node.get('lng'),
+                        'To Node ID': r['to_id'],
+                        'To Name': to_node.get('name', 'Unknown'),
+                        'To Type': r['to_type'],
+                        'To Latitude': to_node.get('lat'),
+                        'To Longitude': to_node.get('lng'),
+                        'Product / Milk Type': ptype,
+                        'Flow': max(0.0, round(primary_flow, 2)),
+                        'Dispatch Quantity': max(0.0, round(primary_flow * (r.get('dispatch_quantity', 0.0) / r['flow']) if r.get('flow', 0) > 0 else 0.0, 2)),
+                        'Unit': r['unit'],
+                        'Distance (km)': r['distance'],
+                        'Transport Cost (₹)': r['cost'],
+                        'Status': 'ACTIVE',
+                        'Reason': 'Optimal Flow',
+                        'Detailed Reason': f'Optimized for minimal transport cost (Dist: {r["distance"]} km) and even percentage balancing.' if r['from_type'] == 'hub' else f'Optimized to fulfill {ptype} market demand (Dist: {r["distance"]} km).',
+                        **{f'{vc} Vehicles': r.get(f'vehicles_{vc}', 0) for vc in vehicle_limits_map.get('global_caps', {}).keys()},
+                        'Total Vehicles': r.get('vehicles_total', 0) if 'vehicles_total' in r else r.get('total_vehicles', 0),
+                        'Total Vehicle Capacity (L)': r.get('capacity_total', 0) if 'capacity_total' in r else r.get('total_vehicle_capacity', 0),
+                        'Excess Vehicle Capacity (L)': r.get('capacity_excess', 0) if 'capacity_excess' in r else r.get('excess_vehicle_capacity', 0),
+                        'VehicleReason': r.get('vehicle_reason', 'Optimal'),
+                        'SupplierCluster': cluster,
+                        'SupplierSubCluster': subcluster,
+                        'Strategy': strategy,
+                        'FlowLowMarginPercentage': bmc_info.get('margin_low', 0.0) if isinstance(bmc_info, dict) else 5.0,
+                        'FlowHighMarginPercentage': bmc_info.get('margin_high', 0.0) if isinstance(bmc_info, dict) else 5.0,
+                        'MinimumFlowQuantity': bmc_info.get('min_flow', 0.0) if isinstance(bmc_info, dict) else 0.0,
+                        'MaximumFlowQuantity': bmc_info.get('max_flow', 0.0) if isinstance(bmc_info, dict) else 0.0,
+                        'Mapping Exists': 'Yes' if (str(r['from_id']), str(r['to_id']), str(ptype)) in valid_route_tuples else 'No'
+                    })
+                
+                # Append extra rows if any substitution occurred
+                for ext_flow, ext_ptype, ext_reason in extra_flows:
+                    routes_data.append({
+                        'Route ID': r['id'] + "_extra",
+                        'From Node ID': r['from_id'],
+                        'From Name': from_node.get('name', 'Unknown'),
+                        'From Type': r['from_type'],
+                        'From Latitude': from_node.get('lat'),
+                        'From Longitude': from_node.get('lng'),
+                        'To Node ID': r['to_id'],
+                        'To Name': to_node.get('name', 'Unknown'),
+                        'To Type': r['to_type'],
+                        'To Latitude': to_node.get('lat'),
+                        'To Longitude': to_node.get('lng'),
+                        'Product / Milk Type': ext_ptype,
+                        'Flow': round(ext_flow, 2),
+                        'Dispatch Quantity': max(0.0, round(ext_flow * (r.get('dispatch_quantity', 0.0) / r['flow']) if r.get('flow', 0) > 0 else 0.0, 2)),
+                        'Unit': r['unit'],
+                        'Distance (km)': r['distance'],
+                        'Transport Cost (₹)': 0.0,
+                        'Status': 'ACTIVE',
+                        'Reason': ext_reason,
+                        'Detailed Reason': 'Substituted internally at plant to fulfill commodity deficit while minimizing external transport cost.',
+                        **{f'{vc} Vehicles': 0 for vc in vehicle_limits_map.get('global_caps', {}).keys()},
+                        'Total Vehicles': 0,
+                        'Total Vehicle Capacity (L)': 0,
+                        'Excess Vehicle Capacity (L)': 0,
+                        'VehicleReason': 'Substituted Flow',
+                        'SupplierCluster': cluster,
+                        'SupplierSubCluster': subcluster,
+                        'Strategy': strategy,
+                        'FlowLowMarginPercentage': 0.0,
+                        'FlowHighMarginPercentage': 0.0,
+                        'MinimumFlowQuantity': 0.0,
+                        'MaximumFlowQuantity': 0.0,
+                        'Mapping Exists': 'Yes' if (str(r['from_id']), str(r['to_id']), str(ext_ptype)) in valid_route_tuples else 'No'
+                    })
 
             # Pre-calculate lookup dictionaries for node capacities and demands
             hub_capacities = {}
@@ -1981,38 +1964,6 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             if not df_plant_wise_dispatch.empty:
                 cols = ['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + [h_name for h_name in bmc_names_list if h_name in df_plant_wise_dispatch.columns]
                 df_plant_wise_dispatch = df_plant_wise_dispatch.reindex(columns=cols)
-                
-                # Update quantities for converted milk
-                mask = df_plant_wise_dispatch['Product'].astype(str).str.contains('to FCM|to MM', na=False)
-                converted_rows = df_plant_wise_dispatch[mask]
-                
-                for _, row in converted_rows.iterrows():
-                    plant = row['Plant']
-                    product = row['Product']
-                    if ' to ' in product:
-                        converted_milk = product.split(' to ')[1].strip()
-                    else:
-                        continue
-                        
-                    target_mask = (df_plant_wise_dispatch['Plant'].astype(str).str.strip().str.lower() == str(plant).strip().lower()) & (df_plant_wise_dispatch['Product'].astype(str).str.strip().str.lower() == str(converted_milk).strip().lower())
-                    if target_mask.any():
-                        target_idx = df_plant_wise_dispatch.index[target_mask][0]
-                        
-                        converted_fulfilled_qty = pd.to_numeric(row['Fullfilled Quantity'], errors='coerce')
-                        converted_fulfilled_qty = converted_fulfilled_qty if pd.notna(converted_fulfilled_qty) else 0
-                        
-                        target_fulfilled_qty = pd.to_numeric(df_plant_wise_dispatch.at[target_idx, 'Fullfilled Quantity'], errors='coerce')
-                        target_fulfilled_qty = target_fulfilled_qty if pd.notna(target_fulfilled_qty) else 0
-                        
-                        req_qty = pd.to_numeric(df_plant_wise_dispatch.at[target_idx, 'Required Quantity'], errors='coerce')
-                        req_qty = req_qty if pd.notna(req_qty) else 0
-                        
-                        total_fulfilled = target_fulfilled_qty + converted_fulfilled_qty
-                        
-                        if req_qty > 0:
-                            df_plant_wise_dispatch.at[target_idx, 'Fullfilled Percentage'] = round((total_fulfilled / req_qty) * 100, 2)
-                        else:
-                            df_plant_wise_dispatch.at[target_idx, 'Fullfilled Percentage'] = ""
             else:
                 df_plant_wise_dispatch = pd.DataFrame(columns=['Plant', 'Product', 'Required Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + bmc_names_list)
             
@@ -2089,7 +2040,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
             # --- Total Supply Report ---
             df_total_supply_temp = df_hub_to_plant.copy()
             if not df_total_supply_temp.empty:
-                df_total_supply_temp['Base Milk'] = df_total_supply_temp['Product / Milk Type'].apply(lambda x: x.split(' to ')[1].strip() if ' to ' in str(x) else str(x).strip())
+                df_total_supply_temp['Base Milk'] = df_total_supply_temp['Product / Milk Type'].apply(lambda x: x.split(' to ')[0].strip() if ' to ' in str(x) else str(x).strip())
                 df_total_supply_temp = df_total_supply_temp.drop(columns=['Product / Milk Type', 'Route ID'], errors='ignore')
                 
                 group_cols = ['From Node ID', 'To Node ID', 'Base Milk']
@@ -2182,357 +2133,12 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
 
             df_vehicle_wise_report = pd.concat([vehicle_report_dist, pd.DataFrame([total_row_dist])], ignore_index=True)
             
-            # --- New Logic: Maximize Vehicle Utilization ---
-            df_routes_optimized = df_routes.copy()
-            
-            # Merge 'Handled by Primary Row' directly into primary rows in Routes (Max Utilized) report
-            if 'VehicleReason' in df_routes_optimized.columns:
-                handled_mask = df_routes_optimized['VehicleReason'] == 'Handled by Primary Row'
-                handled_indices = df_routes_optimized[handled_mask].index.tolist()
-                
-                for sec_idx in handled_indices:
-                    from_id = df_routes_optimized.at[sec_idx, 'From Node ID']
-                    to_id = df_routes_optimized.at[sec_idx, 'To Node ID']
-                    sec_prod = str(df_routes_optimized.at[sec_idx, 'Product / Milk Type'])
-                    target_comm = sec_prod.split(' to ')[-1].strip() if ' to ' in sec_prod else sec_prod.strip()
-                    
-                    # Locate the corresponding primary row candidate
-                    candidates = df_routes_optimized[
-                        (df_routes_optimized['From Node ID'] == from_id) &
-                        (df_routes_optimized['To Node ID'] == to_id) &
-                        (df_routes_optimized['VehicleReason'] != 'Handled by Primary Row') &
-                        (~df_routes_optimized.index.isin(handled_indices))
-                    ].index.tolist()
-                    
-                    pri_idx = None
-                    for c_idx in candidates:
-                        c_prod = str(df_routes_optimized.at[c_idx, 'Product / Milk Type'])
-                        c_target = c_prod.split(' to ')[-1].strip() if ' to ' in c_prod else c_prod.strip()
-                        if c_target == target_comm:
-                            pri_idx = c_idx
-                            break
-                    if pri_idx is None and len(candidates) > 0:
-                        pri_idx = candidates[0]
-                        
-                    if pri_idx is not None:
-                        df_routes_optimized.at[pri_idx, 'Flow'] = round(df_routes_optimized.at[pri_idx, 'Flow'] + df_routes_optimized.at[sec_idx, 'Flow'], 2)
-                        df_routes_optimized.at[pri_idx, 'Dispatch Quantity'] = round(df_routes_optimized.at[pri_idx, 'Dispatch Quantity'] + df_routes_optimized.at[sec_idx, 'Dispatch Quantity'], 2)
-                
-                # Drop secondary rows so two rows aren't created in Routes (Max Utilized)
-                df_routes_optimized = df_routes_optimized[~handled_mask].reset_index(drop=True)
-            
-            # Add new tracking columns for visibility
-            df_routes_optimized['Original Flow'] = df_routes_optimized['Flow']
-            df_routes_optimized['Added Flow'] = 0.0
-            df_routes_optimized['Original Dispatch Quantity'] = df_routes_optimized['Dispatch Quantity']
-            df_routes_optimized['Added Dispatch Quantity'] = 0.0
-            df_routes_optimized['Original Excess Vehicle Capacity (L)'] = df_routes_optimized['Excess Vehicle Capacity (L)']
-            
-            added_details = {} # { t_idx: [(added_amount, source_id, target_comm), ...] }
-            
-            # 1. Setup mappings from plant_bmc_mapping for fallback routes
-            bmc_mappings = {}
-            if 'plant_bmc_mapping' in locals():
-                for p_code, bmc_code, comm in plant_bmc_mapping:
-                    if bmc_code not in bmc_mappings:
-                        bmc_mappings[bmc_code] = []
-                    if (p_code, comm) not in bmc_mappings[bmc_code]:
-                        bmc_mappings[bmc_code].append((p_code, comm))
-
-            # 2. Iterate over all un-dispatched rows (Dispatch Quantity == 0)
-            mask_undispatched = (df_routes_optimized['Dispatch Quantity'] == 0)
-            undispatched_indices = df_routes_optimized[mask_undispatched].index.tolist()
-            
-            for u_idx in undispatched_indices:
-                amount_to_send = df_routes_optimized.at[u_idx, 'Flow']
-                if amount_to_send <= 0:
-                    continue
-                    
-                h_id = df_routes_optimized.at[u_idx, 'From Node ID']
-                p_id = df_routes_optimized.at[u_idx, 'To Node ID']
-                m_type = str(df_routes_optimized.at[u_idx, 'Product / Milk Type']).strip()
-                m_type_lower = m_type.lower()
-                
-                priorities = []
-                allowed_comms = []
-                if m_type_lower == "bm to fcm":
-                    priorities.append((p_id, "FCM"))
-                    priorities.append((p_id, "BM"))
-                    allowed_comms = ["FCM", "BM"]
-                elif m_type_lower == "bm to mm":
-                    priorities.append((p_id, "MM"))
-                    priorities.append((p_id, "BM"))
-                    allowed_comms = ["MM", "BM"]
-                elif m_type_lower == "fcm to mm":
-                    priorities.append((p_id, "MM"))
-                    priorities.append((p_id, "FCM"))
-                    allowed_comms = ["MM", "FCM"]
-                else:
-                    priorities.append((p_id, m_type))
-                    allowed_comms = [m_type.upper()]
-                    
-                for mapped_p, mapped_comm in bmc_mappings.get(h_id, []):
-                    # Only allow mappings that respect the strict segregation rules
-                    if mapped_comm.upper() in allowed_comms:
-                        if (mapped_p, mapped_comm) not in priorities:
-                            priorities.append((mapped_p, mapped_comm))
-                        
-                for target_p, target_comm in priorities:
-                    if amount_to_send <= 0:
-                        break
-                        
-                    # Find base vehicles from h_id to target_p with excess capacity
-                    mask_veh = (
-                        (df_routes_optimized['From Node ID'] == h_id) &
-                        (df_routes_optimized['To Node ID'] == target_p) &
-                        (df_routes_optimized['Excess Vehicle Capacity (L)'] > 0) &
-                        (~df_routes_optimized['Route ID'].astype(str).str.contains('_extra_')) &
-                        (df_routes_optimized['Status'] == 'ACTIVE')
-                    )
-                    veh_indices = df_routes_optimized[mask_veh].index.tolist()
-                    
-                    for v_idx in veh_indices:
-                        if amount_to_send <= 0:
-                            break
-                            
-                        # Strict Segregation Rule:
-                        # Any milk being added to a vehicle MUST EXACTLY match that vehicle's base milk type.
-                        # Since target_comm is already constrained by the allowed_comms logic above,
-                        # enforcing this guarantees BM only goes on BM, CM on CM, FCM on FCM, and MM on MM.
-                        base_v_m_type = str(df_routes_optimized.at[v_idx, 'Product / Milk Type']).strip().upper()
-                        target_m_type = target_comm.upper()
-                        
-                        if base_v_m_type != target_m_type:
-                            continue
-                            
-                        excess = df_routes_optimized.at[v_idx, 'Excess Vehicle Capacity (L)']
-                        if excess <= 0:
-                            continue
-                            
-                        added = min(amount_to_send, excess)
-                        veh_route_id = str(df_routes_optimized.at[v_idx, 'Route ID'])
-                        
-                        t_idx = v_idx
-                        df_routes_optimized.at[t_idx, 'Flow'] = round(df_routes_optimized.at[t_idx, 'Flow'] + added, 2)
-                        df_routes_optimized.at[t_idx, 'Added Flow'] = round(df_routes_optimized.at[t_idx, 'Added Flow'] + added, 2)
-                        df_routes_optimized.at[t_idx, 'Dispatch Quantity'] = round(df_routes_optimized.at[t_idx, 'Dispatch Quantity'] + added, 2)
-                        df_routes_optimized.at[t_idx, 'Added Dispatch Quantity'] = round(df_routes_optimized.at[t_idx, 'Added Dispatch Quantity'] + added, 2)
-                        
-                        if t_idx not in added_details:
-                            added_details[t_idx] = []
-                        orig_m_type_raw = str(df_routes_optimized.at[u_idx, 'Product / Milk Type']).strip()
-                        added_details[t_idx].append((added, str(df_routes_optimized.at[u_idx, 'Route ID']), target_comm, orig_m_type_raw))
-                            
-                        current_reason = str(df_routes_optimized.at[t_idx, 'Detailed Reason'])
-                        orig_m_type = m_type.upper()
-                        new_reason_part = f"Loaded {added}L of un-dispatched {orig_m_type} (as {target_comm}) from {df_routes_optimized.at[u_idx, 'Route ID']}"
-                        if current_reason == "N/A" or pd.isna(df_routes_optimized.at[t_idx, 'Detailed Reason']) or current_reason == "nan":
-                            df_routes_optimized.at[t_idx, 'Detailed Reason'] = new_reason_part
-                        else:
-                            df_routes_optimized.at[t_idx, 'Detailed Reason'] = current_reason + " | " + new_reason_part
-                            
-                        df_routes_optimized.at[v_idx, 'Excess Vehicle Capacity (L)'] = max(0.0, round(df_routes_optimized.at[v_idx, 'Excess Vehicle Capacity (L)'] - added, 2))
-                        amount_to_send -= added
-                        
-                # Deduct sent amount from the undispatched row to avoid double counting Flow overall
-                sent_amount = df_routes_optimized.at[u_idx, 'Flow'] - amount_to_send
-                if sent_amount > 0:
-                    df_routes_optimized.at[u_idx, 'Flow'] = round(amount_to_send, 2)
-                    df_routes_optimized.at[u_idx, 'Detailed Reason'] = str(df_routes_optimized.at[u_idx, 'Detailed Reason']) + f" | {sent_amount}L sent along with other routes."
-            
-            # 3. Generate dynamic Added Flow columns based on added_details
-            if added_details:
-                max_added = max([len(v) for v in added_details.values()])
-                for i in range(1, max_added + 1):
-                    df_routes_optimized[f'Added Flow {i}'] = 0.0
-                    df_routes_optimized[f'Added Flow Source {i}'] = "N/A"
-                    df_routes_optimized[f'Added Flow Milk Type {i}'] = "N/A"
-                    df_routes_optimized[f'Added Flow Original Milk Type {i}'] = "N/A"
-                
-                for t_idx, details in added_details.items():
-                    for i, (amount, source, milk_type, orig_milk_type) in enumerate(details):
-                        col_idx = i + 1
-                        df_routes_optimized.at[t_idx, f'Added Flow {col_idx}'] = amount
-                        df_routes_optimized.at[t_idx, f'Added Flow Source {col_idx}'] = source
-                        df_routes_optimized.at[t_idx, f'Added Flow Milk Type {col_idx}'] = milk_type
-                        df_routes_optimized.at[t_idx, f'Added Flow Original Milk Type {col_idx}'] = orig_milk_type
-            
-            # Add Target Milk column right after Product / Milk Type
-            df_routes_optimized['Target Milk'] = df_routes_optimized['Product / Milk Type'].apply(
-                lambda x: str(x).split(' to ')[1].strip() if ' to ' in str(x).lower() else str(x).strip()
-            )
-            if 'Product / Milk Type' in df_routes_optimized.columns:
-                cols_opt = list(df_routes_optimized.columns)
-                cols_opt.remove('Target Milk')
-                idx = cols_opt.index('Product / Milk Type') + 1
-                cols_opt = cols_opt[:idx] + ['Target Milk'] + cols_opt[idx:]
-                df_routes_optimized = df_routes_optimized[cols_opt]
-            
-            # --- Generate BMC Wise Dispatch (Max Utilized) ---
-            dispatch_map_opt = {}
-            converted_map_opt = {}
-            converted_types = set()
-            
-            df_opt_active = df_routes_optimized[df_routes_optimized['Status'] == 'ACTIVE']
-            for _, r in df_opt_active.iterrows():
-                from_id = r['From Node ID']
-                to_id = r['To Node ID']
-                
-                # Base flow of the vehicle
-                raw_base_m_type = str(r['Product / Milk Type']).strip()
-                base_m_type = raw_base_m_type
-                
-                # If the vehicle itself is natively carrying converted milk, collapse it to its target base type
-                native_converted_type = None
-                if " to " in raw_base_m_type.lower():
-                    native_converted_type = raw_base_m_type
-                    base_m_type = raw_base_m_type.split(" to ")[1].strip()
-                    converted_types.add(native_converted_type)
-                    
-                total_qty = r.get('Dispatch Quantity', 0.0)
-                if pd.notna(total_qty) and total_qty > 0:
-                    key_base = (from_id, to_id, base_m_type)
-                    dispatch_map_opt[key_base] = dispatch_map_opt.get(key_base, 0.0) + total_qty
-                    
-                    if native_converted_type:
-                        orig_qty = r.get('Original Dispatch Quantity', total_qty)
-                        if pd.notna(orig_qty) and orig_qty > 0:
-                            key_conv_native = (from_id, to_id, base_m_type, native_converted_type)
-                            converted_map_opt[key_conv_native] = converted_map_opt.get(key_conv_native, 0.0) + orig_qty
-                
-            bmc_dispatch_opt_rows = []
-            sorted_conv_types = sorted(list(converted_types))
-            for h in hubs:
-                h_prods = h.get('products', [])
-                if not h_prods and 'capacity' in h:
-                    h_prods = [{'type': 'Cow Milk', 'capacity': h['capacity']}]
-                
-                hub_cap_map = {}
-                hub_commodities_opt = set()
-                for p_item in h_prods:
-                    if p_item.get('type'):
-                        hub_commodities_opt.add(p_item['type'])
-                        hub_cap_map[p_item['type']] = float(p_item.get('capacity', 0.0))
-                        
-                for (from_id, to_id, prod_type) in dispatch_map_opt:
-                    if from_id == h['id']:
-                        hub_commodities_opt.add(prod_type)
-                        
-                for m in sorted(list(hub_commodities_opt)):
-                    total_dispatch_opt = sum(dispatch_map_opt.get((h['id'], p['id'], m), 0.0) for p in plants)
-                    total_cap = hub_cap_map.get(m, 0.0)
-                    
-                    if round(total_dispatch_opt, 2) > 0 or round(total_cap, 2) > 0:
-                        row_dispatch_dict = {
-                            'BMC': h.get('name', h['id']),
-                            'Product': m,
-                            'Total Capacity': round(total_cap, 2),
-                            'Quantity': round(total_dispatch_opt, 2),
-                            'Spare': round(total_cap - total_dispatch_opt, 2)
-                        }
-                        for p in plants:
-                            p_name = p.get('name', p['id'])
-                            disp_val = dispatch_map_opt.get((h['id'], p['id'], m), 0.0)
-                            row_dispatch_dict[p_name] = round(disp_val, 2)
-                            
-                        # Add the converted milk columns
-                        sum_conv_val = 0.0
-                        for conv_type in sorted_conv_types:
-                            conv_val = sum(converted_map_opt.get((h['id'], p['id'], m, conv_type), 0.0) for p in plants)
-                            if conv_val > 0:
-                                row_dispatch_dict[conv_type] = round(conv_val, 2)
-                                sum_conv_val += conv_val
-                            else:
-                                row_dispatch_dict[conv_type] = 0.0
-                                
-                        row_dispatch_dict['Actual Quantity'] = round(total_dispatch_opt - sum_conv_val, 2)
-                        bmc_dispatch_opt_rows.append(row_dispatch_dict)
-                        
-            df_bmc_wise_dispatch_opt = pd.DataFrame(bmc_dispatch_opt_rows)
-            if not df_bmc_wise_dispatch_opt.empty:
-                cols = ['BMC', 'Product', 'Total Capacity'] + sorted_conv_types + ['Actual Quantity', 'Quantity', 'Spare'] + [p_name for p_name in plant_names_list if p_name in df_bmc_wise_dispatch_opt.columns]
-                df_bmc_wise_dispatch_opt = df_bmc_wise_dispatch_opt.reindex(columns=cols)
-            else:
-                df_bmc_wise_dispatch_opt = pd.DataFrame(columns=['BMC', 'Product', 'Total Capacity'] + sorted_conv_types + ['Actual Quantity', 'Quantity', 'Spare'] + plant_names_list)
-                
-                
-            # --- Generate Plant Wise Dispatch (Max Utilized) ---
-            plant_dispatch_opt_rows = []
-            for p in plants:
-                plant_commodities_opt = set()
-                for (from_id, to_id, prod_type) in dispatch_map_opt:
-                    if to_id == p['id']:
-                        plant_commodities_opt.add(prod_type)
-                        
-                p_commodities = {}
-                p_demands = p.get('demands', [])
-                if p_demands:
-                    for d in p_demands:
-                        p_commodities[d['type']] = d.get('demand', 0.0)
-                else:
-                    inflow_milks = p.get('inflow_milks', [])
-                    if not inflow_milks:
-                        inflow_milks = [
-                            {'type': 'Cow Milk', 'capacity': p.get('capacity', 10000)},
-                            {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000)}
-                        ]
-                    for m in inflow_milks:
-                        if 'type' in m:
-                            p_commodities[m['type']] = m.get('capacity', 0.0)
-                            
-                for m in list(plant_commodities_opt):
-                    if m not in p_commodities:
-                        p_commodities[m] = 0.0
-                        
-                for m, req_qty in sorted(p_commodities.items()):
-                    total_dispatch_opt = sum(dispatch_map_opt.get((h['id'], p['id'], m), 0.0) for h in hubs)
-                    
-                    if req_qty == 0:
-                        dispatch_pct = ""
-                    else:
-                        dispatch_pct = round((total_dispatch_opt / req_qty * 100.0), 2)
-                        
-                    row_dispatch_dict = {
-                        'Plant': p.get('name', p['id']),
-                        'Product': m,
-                    }
-                    
-                    # Add converted milk columns (aggregated across all hubs sending to this plant)
-                    sum_conv_val = 0.0
-                    for conv_type in sorted_conv_types:
-                        conv_val = sum(converted_map_opt.get((h['id'], p['id'], m, conv_type), 0.0) for h in hubs)
-                        if conv_val > 0:
-                            row_dispatch_dict[conv_type] = round(conv_val, 2)
-                            sum_conv_val += conv_val
-                        else:
-                            row_dispatch_dict[conv_type] = 0.0
-                            
-                    row_dispatch_dict['Required Quantity'] = round(req_qty, 2)
-                    row_dispatch_dict['Actual Quantity'] = round(total_dispatch_opt - sum_conv_val, 2)
-                    row_dispatch_dict['Fullfilled Quantity'] = round(total_dispatch_opt, 2)
-                    row_dispatch_dict['Fullfilled Percentage'] = dispatch_pct
-                    
-                    for h in hubs:
-                        h_name = h.get('name', h['id'])
-                        disp_val = dispatch_map_opt.get((h['id'], p['id'], m), 0.0)
-                        row_dispatch_dict[h_name] = round(disp_val, 2)
-                        
-                    plant_dispatch_opt_rows.append(row_dispatch_dict)
-                    
-            df_plant_wise_dispatch_opt = pd.DataFrame(plant_dispatch_opt_rows)
-            if not df_plant_wise_dispatch_opt.empty:
-                cols = ['Plant', 'Product', 'Required Quantity'] + sorted_conv_types + ['Actual Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + [h_name for h_name in bmc_names_list if h_name in df_plant_wise_dispatch_opt.columns]
-                df_plant_wise_dispatch_opt = df_plant_wise_dispatch_opt.reindex(columns=cols)
-            else:
-                df_plant_wise_dispatch_opt = pd.DataFrame(columns=['Plant', 'Product', 'Required Quantity'] + sorted_conv_types + ['Actual Quantity', 'Fullfilled Quantity', 'Fullfilled Percentage'] + bmc_names_list)
-
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                 df_vehicle_wise_report.to_excel(writer, sheet_name='Vehicle Wise Report', index=False)
                 df_kpi.to_excel(writer, sheet_name='KPI Summary', index=False)
                 df_summary.to_excel(writer, sheet_name='Summary', index=False)
                 df_nodes.to_excel(writer, sheet_name='Nodes', index=False)
                 df_routes.to_excel(writer, sheet_name='Routes', index=False)
-                df_routes_optimized.to_excel(writer, sheet_name='Routes (Max Utilized)', index=False)
                 df_plant_report.to_excel(writer, sheet_name='Plant Consumption Report', index=False)
                 df_plant_received_report.to_excel(writer, sheet_name='Plant Received Report', index=False)
                 df_hub_report.to_excel(writer, sheet_name='BMC Supply Report', index=False)
@@ -2542,264 +2148,45 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 df_vehicle_bifurcation.to_excel(writer, sheet_name='Vehicle Wise Bifurcation', index=False)
                 df_bmc_wise_alloc.to_excel(writer, sheet_name='BMC Wise Allocation', index=False)
                 df_bmc_wise_dispatch.to_excel(writer, sheet_name='BMC Wise Dispatch', index=False)
-                df_bmc_wise_dispatch_opt.to_excel(writer, sheet_name='BMC Wise Dispatch (Max Util)', index=False)
                 df_plant_wise_alloc.to_excel(writer, sheet_name='Plant Wise Allocation', index=False)
                 df_plant_wise_dispatch.to_excel(writer, sheet_name='Plant Wise Dispatch', index=False)
-                df_plant_wise_dispatch_opt.to_excel(writer, sheet_name='Plant Wise Dispatch (Max Util)', index=False)
                 df_veh_alloc.to_excel(writer, sheet_name='BMC Vehicle Allocation', index=False)
                 
                 # --- New Supplier Report ---
-                dispatch_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'cases', 'Summarized_Dispatch_Details_Supplier-sup-plant.xlsx')
-                df_dispatch = pd.DataFrame()
-                if os.path.exists(dispatch_file_path):
-                    try:
-                        df_dispatch = pd.read_excel(dispatch_file_path)
-                        # Ensure columns are strings for matching
-                        if 'Supplier' in df_dispatch.columns:
-                            df_dispatch['Supplier'] = df_dispatch['Supplier'].astype(str).str.replace(r'\.0$', '', regex=True)
-                        if 'Supplier Code' in df_dispatch.columns:
-                            df_dispatch['Supplier Code'] = df_dispatch['Supplier Code'].astype(str).str.replace(r'\.0$', '', regex=True)
-                    except Exception as e:
-                        print("Error reading Summarized_Dispatch_Details_Supplier:", e)
+                try:
+                    dispatch_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'cases', 'Summarized_Dispatch_Details_Supplier-sup-plant.xlsx')
+                    df_dispatch = pd.DataFrame()
+                    if os.path.exists(dispatch_file_path):
+                        try:
+                            df_dispatch = pd.read_excel(dispatch_file_path)
+                            # Ensure columns are strings for matching
+                            if 'Supplier' in df_dispatch.columns:
+                                df_dispatch['Supplier'] = df_dispatch['Supplier'].astype(str).str.replace(r'\.0$', '', regex=True)
+                            if 'Supplier Code' in df_dispatch.columns:
+                                df_dispatch['Supplier Code'] = df_dispatch['Supplier Code'].astype(str).str.replace(r'\.0$', '', regex=True)
+                        except Exception as e:
+                            print("Error reading Summarized_Dispatch_Details_Supplier:", e)
 
-                sup_code_to_name = {}
-                if excel_file_path and os.path.exists(excel_file_path):
-                    try:
-                        df_dist = pd.read_excel(excel_file_path, sheet_name='Distance')
-                        for _, row in df_dist.iterrows():
-                            sc = str(row.get('Supplier Code', '')).strip()
-                            if sc and sc not in sup_code_to_name:
-                                sup_code_to_name[sc] = str(row.get('Supplier', ''))
-                    except Exception as e:
-                        print("Error reading Distance sheet for Supplier Report:", e)
+                    sup_code_to_name = {}
+                    if excel_file_path and os.path.exists(excel_file_path):
+                        try:
+                            df_dist = pd.read_excel(excel_file_path, sheet_name='Distance')
+                            for _, row in df_dist.iterrows():
+                                sc = str(row.get('Supplier Code', '')).strip()
+                                if sc and sc not in sup_code_to_name:
+                                    sup_code_to_name[sc] = str(row.get('Supplier', ''))
+                        except Exception as e:
+                            print("Error reading Distance sheet for Supplier Report:", e)
 
-                supplier_report_rows = []
-                
-                # Assign Supplier Code to df_total_supply
-                df_total_supply_sup = df_total_supply.copy()
-                df_total_supply_sup['Supplier Code'] = df_total_supply_sup['From Node ID'].apply(
-                    lambda x: str(x).split('_')[0].strip() if len(str(x).split('_')) >= 2 else str(x).strip()
-                )
-
-                for sup_code, group in df_total_supply_sup.groupby('Supplier Code'):
-                    total_tankers = group['Total Vehicles'].sum()
+                    supplier_report_rows = []
                     
-                    if 'Total Distance' in group.columns:
-                        total_distance = group['Total Distance'].sum()
-                    elif 'Dispatch Quantity' in group.columns:
-                        total_distance = group.loc[group['Dispatch Quantity'] > 0, 'Distance (km)'].sum()
-                    else:
-                        total_distance = group['Distance (km)'].sum()
-
-                    if 'Dispatch Quantity' in group.columns:
-                        total_supply = group['Dispatch Quantity'].sum()
-                        left_quantity = (group['Flow'] - group['Dispatch Quantity']).sum()
-                    else:
-                        total_supply = group['Flow'].sum()
-                        left_quantity = group['Flow'].sum()
-                    
-                    veh_counts = {}
-                    for vc in veh_cols:
-                        if vc in group.columns:
-                            veh_counts[vc] = int(group[vc].sum())
-                        else:
-                            veh_counts[vc] = 0
-                            
-                    sup_name = sup_code_to_name.get(sup_code, '')
-
-                    row_dict = {
-                        'Supplier': sup_name,
-                        'Supplier Code': sup_code,
-                    }
-                    
-                    # Add individual vehicle columns
-                    for vc in veh_cols:
-                        row_dict[vc] = veh_counts.get(vc, 0)
-                        
-                    row_dict['Total Vehicles'] = total_tankers
-                    row_dict['Total Distance'] = total_distance
-                    row_dict['Total Supply'] = total_supply
-                    row_dict['Left Quantity'] = left_quantity
-
-                    # Join with df_dispatch
-                    if not df_dispatch.empty and sup_code:
-                        sup_col = 'Supplier Code' if 'Supplier Code' in df_dispatch.columns else 'Supplier'
-                        if sup_col in df_dispatch.columns:
-                            match = df_dispatch[df_dispatch[sup_col] == sup_code]
-                            if not match.empty:
-                                match_row = match.iloc[0].to_dict()
-                                for k, v in match_row.items():
-                                    if k not in row_dict:
-                                        row_dict[k] = v
-                                    else:
-                                        row_dict[f'Dispatch_{k}'] = v
-                    
-                    supplier_report_rows.append(row_dict)
-                
-                df_supplier_summary = pd.DataFrame(supplier_report_rows)
-                df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
-
-                # --- BMC Vehicle Allocation (Max Utilized) ---
-                veh_cols_opt = [f'{vc} Vehicles' for vc in vehicle_limits_map.get('global_caps', {}).keys()]
-                cols_to_extract_opt = [
-                    'From Node ID', 'From Name', 'To Node ID', 'To Name', 
-                    'Product / Milk Type', 'Flow', 'Original Dispatch Quantity', 'Added Flow', 'Dispatch Quantity', 'Unit', 'Distance (km)', 'Transport Cost (₹)'
-                ] + veh_cols_opt + [
-                    'Total Vehicles', 'Total Vehicle Capacity (L)', 'Excess Vehicle Capacity (L)',
-                    'SupplierCluster', 'SupplierSubCluster', 'Strategy',
-                    'FlowLowMarginPercentage', 'FlowHighMarginPercentage',
-                    'MinimumFlowQuantity', 'MaximumFlowQuantity', 'VehicleReason'
-                ]
-                valid_cols_opt = [c for c in cols_to_extract_opt if c in df_opt_active.columns]
-                
-                added_flow_cols = []
-                i = 1
-                while f'Added Flow {i}' in df_opt_active.columns:
-                    added_flow_cols.extend([f'Added Flow {i}', f'Added Flow Source {i}', f'Added Flow Milk Type {i}'])
-                    i += 1
-                    
-                df_veh_alloc_opt = df_opt_active[valid_cols_opt + added_flow_cols].copy()
-                if 'Flow' in df_veh_alloc_opt.columns and 'Dispatch Quantity' in df_veh_alloc_opt.columns:
-                    df_veh_alloc_opt['Left Quantity'] = df_veh_alloc_opt['Flow'] - df_veh_alloc_opt['Dispatch Quantity']
-                
-                df_veh_alloc_opt = df_veh_alloc_opt.rename(columns={
-                    'From Node ID': 'BMC ID',
-                    'From Name': 'BMC Name',
-                    'To Node ID': 'Plant ID',
-                    'To Name': 'Plant Name',
-                    'Flow': 'Flow Quantity',
-                    'Original Dispatch Quantity': 'Original Flow'
-                })
-                df_veh_alloc_opt.to_excel(writer, sheet_name='BMC Vehicle Allocation (Max Util)', index=False)
-
-                # --- Total Supply Report (Max Utilized) ---
-                df_total_supply_opt_temp = df_opt_active.copy()
-                if not df_total_supply_opt_temp.empty:
-                    df_total_supply_opt_temp['Base Milk'] = df_total_supply_opt_temp['Product / Milk Type'].apply(lambda x: str(x).split(' to ')[1].strip() if ' to ' in str(x).lower() else str(x).strip())
-                    
-                    cols_to_drop = ['Product / Milk Type', 'Route ID', 'Target Milk']
-                    i = 1
-                    while f'Added Flow {i}' in df_total_supply_opt_temp.columns:
-                        cols_to_drop.extend([f'Added Flow {i}', f'Added Flow Source {i}', f'Added Flow Milk Type {i}', f'Added Flow Original Milk Type {i}'])
-                        i += 1
-                    df_total_supply_opt_temp = df_total_supply_opt_temp.drop(columns=cols_to_drop, errors='ignore')
-                    
-                    group_cols = ['From Node ID', 'To Node ID', 'Base Milk']
-                    agg_dict = {}
-                    for col in df_total_supply_opt_temp.columns:
-                        if col in group_cols:
-                            continue
-                        if col in [
-                            'Flow', 'Dispatch Quantity', 
-                            'Original Flow', 'Added Flow', 
-                            'Original Dispatch Quantity', 'Added Dispatch Quantity', 
-                            'Original Excess Vehicle Capacity (L)', 'Excess Vehicle Capacity (L)', 
-                            'Transport Cost (₹)', 'Total Vehicles', 'Total Vehicle Capacity (L)'
-                        ] or str(col).endswith(' Vehicles'):
-                            agg_dict[col] = 'sum'
-                        else:
-                            agg_dict[col] = 'first'
-                    
-                    df_total_supply_opt = df_total_supply_opt_temp.groupby(group_cols, observed=True).agg(agg_dict).reset_index()
-                    df_total_supply_opt['Route ID'] = 'route_' + df_total_supply_opt['From Node ID'].astype(str) + '_' + df_total_supply_opt['To Node ID'].astype(str) + '_' + df_total_supply_opt['Base Milk'].astype(str).str.replace(' ', '_')
-                    
-                    original_cols = [c for c in df_opt_active.columns if c not in ['Target Milk'] and not str(c).startswith('Added Flow ')]
-                    if 'Product / Milk Type' in original_cols:
-                        idx = original_cols.index('Product / Milk Type')
-                        new_cols = original_cols[:idx] + ['Base Milk'] + original_cols[idx+1:]
-                    else:
-                        new_cols = original_cols + ['Base Milk']
-                        
-                    df_total_supply_opt = df_total_supply_opt[[c for c in new_cols if c in df_total_supply_opt.columns]]
-                    
-                    if 'Dispatch Quantity' in df_total_supply_opt.columns:
-                        df_total_supply_opt['Total Distance'] = df_total_supply_opt.apply(lambda r: (r.get('Total Vehicles', 0) * r.get('Distance (km)', 0)) if r.get('Dispatch Quantity', 0) > 0 else 0.0, axis=1)
-                    else:
-                        df_total_supply_opt['Total Distance'] = df_total_supply_opt.get('Total Vehicles', 0) * df_total_supply_opt.get('Distance (km)', 0)
-                        
-                    global_caps = vehicle_limits_map.get('global_caps', {})
-                    for vc, cap in global_caps.items():
-                        v_col = f'{vc} Vehicles'
-                        new_col = f'{vc} Dispatch Capacity'
-                        if v_col in df_total_supply_opt.columns:
-                            tot_cap_s = df_total_supply_opt['Total Vehicle Capacity (L)'].replace({0: 1})
-                            mask_cap_pos = df_total_supply_opt['Total Vehicle Capacity (L)'] > 0
-                            
-                            if 'Dispatch Quantity' in df_total_supply_opt.columns:
-                                df_total_supply_opt[new_col] = round((df_total_supply_opt['Dispatch Quantity'] * (df_total_supply_opt[v_col] * cap) / tot_cap_s).where(mask_cap_pos, 0.0), 2)
-                                if 'Original Dispatch Quantity' in df_total_supply_opt.columns:
-                                    df_total_supply_opt[f'{vc} Original Dispatch Capacity'] = round((df_total_supply_opt['Original Dispatch Quantity'] * (df_total_supply_opt[v_col] * cap) / tot_cap_s).where(mask_cap_pos, 0.0), 2)
-                                    df_total_supply_opt[f'{vc} Added Dispatch Capacity'] = round((df_total_supply_opt['Added Dispatch Quantity'] * (df_total_supply_opt[v_col] * cap) / tot_cap_s).where(mask_cap_pos, 0.0), 2)
-                            else:
-                                df_total_supply_opt[new_col] = round((df_total_supply_opt['Flow'] * (df_total_supply_opt[v_col] * cap) / tot_cap_s).where(mask_cap_pos, 0.0), 2)
-                else:
-                    cols = [c if c != 'Product / Milk Type' else 'Base Milk' for c in df_opt_active.columns if c != 'Target Milk' and not str(c).startswith('Added Flow ')] + ['Total Distance']
-                    global_caps = vehicle_limits_map.get('global_caps', {})
-                    for vc in global_caps.keys():
-                        cols.extend([f'{vc} Dispatch Capacity', f'{vc} Original Dispatch Capacity', f'{vc} Added Dispatch Capacity'])
-                    df_total_supply_opt = pd.DataFrame(columns=cols)
-
-                df_total_supply_opt.to_excel(writer, sheet_name='Total Supply (Max Util)', index=False)
-                    
-                # --- Vehicle Wise Bifurcation (Max Utilized) ---
-                veh_bifurcation_opt_rows = []
-                global_caps = vehicle_limits_map.get('global_caps', {})
-                for vc, cap in global_caps.items():
-                    v_col = f'{vc} Vehicles'
-                    if v_col in df_total_supply_opt.columns and df_total_supply_opt[v_col].sum() > 0:
-                        total_veh = df_total_supply_opt[v_col].sum()
-                        total_dist = (df_total_supply_opt['Distance (km)'] * df_total_supply_opt[v_col]).sum()
-                        
-                        disp_cap_col = f'{vc} Dispatch Capacity'
-                        orig_disp_cap_col = f'{vc} Original Dispatch Capacity'
-                        add_disp_cap_col = f'{vc} Added Dispatch Capacity'
-                        
-                        if disp_cap_col in df_total_supply_opt.columns:
-                            total_supply_v = df_total_supply_opt[disp_cap_col].sum()
-                        else:
-                            supply_series = df_total_supply_opt['Flow'] * (df_total_supply_opt[v_col] * cap) / df_total_supply_opt['Total Vehicle Capacity (L)'].replace({0: 1})
-                            total_supply_v = supply_series.where(df_total_supply_opt['Total Vehicle Capacity (L)'] > 0, 0).sum()
-                            
-                        total_orig_supply_v = df_total_supply_opt[orig_disp_cap_col].sum() if orig_disp_cap_col in df_total_supply_opt.columns else 0.0
-                        total_add_supply_v = df_total_supply_opt[add_disp_cap_col].sum() if add_disp_cap_col in df_total_supply_opt.columns else 0.0
-                        
-                        veh_bifurcation_opt_rows.append({
-                            'Vehicle Category': vc,
-                            'Total Distance': total_dist,
-                            'Original Dispatch Capacity': total_orig_supply_v,
-                            'Added Dispatch Capacity': total_add_supply_v,
-                            'Dispatch Capacity': total_supply_v,
-                            'TotalVehicle': total_veh
-                        })
-                        
-                df_vehicle_bifurcation_opt = pd.DataFrame(veh_bifurcation_opt_rows)
-                if not df_vehicle_bifurcation_opt.empty:
-                    total_row_bif = {
-                        'Vehicle Category': 'Grand Total',
-                        'Total Distance': df_vehicle_bifurcation_opt['Total Distance'].sum(),
-                        'Original Dispatch Capacity': df_vehicle_bifurcation_opt['Original Dispatch Capacity'].sum(),
-                        'Added Dispatch Capacity': df_vehicle_bifurcation_opt['Added Dispatch Capacity'].sum(),
-                        'Dispatch Capacity': df_vehicle_bifurcation_opt['Dispatch Capacity'].sum(),
-                        'TotalVehicle': df_vehicle_bifurcation_opt['TotalVehicle'].sum()
-                    }
-                    df_vehicle_bifurcation_opt = pd.concat([df_vehicle_bifurcation_opt, pd.DataFrame([total_row_bif])], ignore_index=True)
-                else:
-                    df_vehicle_bifurcation_opt = pd.DataFrame(columns=['Vehicle Category', 'Total Distance', 'Original Dispatch Capacity', 'Added Dispatch Capacity', 'Dispatch Capacity', 'TotalVehicle'])
-                    
-                df_vehicle_bifurcation_opt.to_excel(writer, sheet_name='Vehicle Wise Bifurcation (Max Util)', index=False)
-
-                # --- Supplier Report (Max Utilized) ---
-                supplier_report_opt_rows = []
-                if not df_total_supply_opt.empty:
-                    df_total_supply_opt_sup = df_total_supply_opt.copy()
-                    df_total_supply_opt_sup['Supplier Code'] = df_total_supply_opt_sup['From Node ID'].apply(
+                    # Assign Supplier Code to df_total_supply
+                    df_total_supply_sup = df_total_supply.copy()
+                    df_total_supply_sup['Supplier Code'] = df_total_supply_sup['From Node ID'].apply(
                         lambda x: str(x).split('_')[0].strip() if len(str(x).split('_')) >= 2 else str(x).strip()
                     )
-                    
-                    if 'Detailed Reason' in df_total_supply_opt_sup.columns:
-                        df_total_supply_opt_sup = df_total_supply_opt_sup.drop(columns=['Detailed Reason'])
 
-                    for sup_code, group in df_total_supply_opt_sup.groupby('Supplier Code'):
+                    for sup_code, group in df_total_supply_sup.groupby('Supplier Code'):
                         total_tankers = group['Total Vehicles'].sum()
                         
                         if 'Total Distance' in group.columns:
@@ -2808,72 +2195,58 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                             total_distance = group.loc[group['Dispatch Quantity'] > 0, 'Distance (km)'].sum()
                         else:
                             total_distance = group['Distance (km)'].sum()
-                            
+
                         if 'Dispatch Quantity' in group.columns:
                             total_supply = group['Dispatch Quantity'].sum()
                             left_quantity = (group['Flow'] - group['Dispatch Quantity']).sum()
                         else:
                             total_supply = group['Flow'].sum()
                             left_quantity = group['Flow'].sum()
-                            
+                        
                         veh_counts = {}
-                        veh_cols = [f"{vc} Vehicles" for vc in global_caps.keys()]
-                        for vc, vc_col in zip(global_caps.keys(), veh_cols):
-                            if vc_col in group.columns:
-                                veh_counts[vc] = int(group[vc_col].sum())
+                        for vc in veh_cols:
+                            if vc in group.columns:
+                                veh_counts[vc] = int(group[vc].sum())
                             else:
                                 veh_counts[vc] = 0
                                 
                         sup_name = sup_code_to_name.get(sup_code, '')
-                        
+
                         row_dict = {
-                            'Supplier Code': sup_code,
                             'Supplier': sup_name,
+                            'Supplier Code': sup_code,
                         }
                         
+                        # Add individual vehicle columns
                         for vc in veh_cols:
-                            row_dict[vc] = veh_counts.get(vc.replace(' Vehicles', ''), 0)
+                            row_dict[vc] = veh_counts.get(vc, 0)
                             
                         row_dict['Total Vehicles'] = total_tankers
                         row_dict['Total Distance'] = total_distance
                         row_dict['Total Supply'] = total_supply
                         row_dict['Left Quantity'] = left_quantity
-                        
-                        if 'df_dispatch' in locals() and not df_dispatch.empty and sup_code:
+
+                        # Join with df_dispatch
+                        if not df_dispatch.empty and sup_code:
                             sup_col = 'Supplier Code' if 'Supplier Code' in df_dispatch.columns else 'Supplier'
                             if sup_col in df_dispatch.columns:
                                 match = df_dispatch[df_dispatch[sup_col] == sup_code]
                                 if not match.empty:
                                     match_row = match.iloc[0].to_dict()
                                     for k, v in match_row.items():
-                                        if k not in ['Supplier', 'Supplier Code']:
-                                            if k not in row_dict:
-                                                row_dict[k] = v
-                                            else:
-                                                row_dict[f'Dispatch_{k}'] = v
-                                                
-                        supplier_report_opt_rows.append(row_dict)
+                                        if k not in row_dict:
+                                            row_dict[k] = v
+                                        else:
+                                            row_dict[f'Dispatch_{k}'] = v
                         
-                df_supplier_summary_opt = pd.DataFrame(supplier_report_opt_rows)
-                df_supplier_summary_opt.to_excel(writer, sheet_name='Supplier Report (Max Util)', index=False)
-                
-                try:
-                    from openpyxl.styles import PatternFill
-                    from collections import Counter
-                    base_route_ids = [str(r).split('_extra_')[0] if '_extra_' in str(r) else str(r) for r in df_routes_optimized['Route ID']]
-                    counts = Counter(base_route_ids)
-                    shared_base_ids = set(k for k, v in counts.items() if v > 1)
+                        supplier_report_rows.append(row_dict)
                     
-                    highlight_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-                    worksheet = writer.sheets['Routes (Max Utilized)']
-                    for row_idx, base_id in enumerate(base_route_ids):
-                        if base_id in shared_base_ids:
-                            excel_row = row_idx + 2
-                            for col_idx in range(1, len(df_routes_optimized.columns) + 1):
-                                worksheet.cell(row=excel_row, column=col_idx).fill = highlight_fill
+                    df_supplier_summary = pd.DataFrame(supplier_report_rows)
+                    df_supplier_summary.to_excel(writer, sheet_name='Supplier Report', index=False)
+                    
                 except Exception as e:
-                    print("Error highlighting routes:", str(e))
-                
+                    print("Error creating Supplier Report:", e)
+            
             #update_job_completed(job_id, output_filename, res['summary'])
         #else:
             #update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")

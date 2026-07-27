@@ -86,8 +86,15 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         bmc_supp_map = dict(zip(df_map['BMCCode'].astype(str), df_map['Supplier']))
         bmc_supp_code_map = dict(zip(df_map['BMCCode'].astype(str), df_map['SupplierCode']))
         
-        df_veh = pd.read_excel(xls, 'BMC Vehicle Allocation') if 'BMC Vehicle Allocation' in sheet_names else pd.DataFrame()
-        df_routes = pd.read_excel(xls, 'Hub To Plant') if 'Hub To Plant' in sheet_names else pd.DataFrame()
+        veh_sheet = 'BMC Vehicle Allocation (Max Uti ' if 'BMC Vehicle Allocation (Max Uti ' in sheet_names else ('BMC Vehicle Allocation (Max Uti' if 'BMC Vehicle Allocation (Max Uti' in sheet_names else 'BMC Vehicle Allocation (Max Util)')
+        df_veh = pd.read_excel(xls, veh_sheet) if veh_sheet in sheet_names else pd.DataFrame()
+        
+        if 'Routes (Max Utilized)' in sheet_names:
+            df_routes = pd.read_excel(xls, 'Routes (Max Utilized)')
+            if 'Status' in df_routes.columns:
+                df_routes = df_routes[df_routes['Status'].astype(str).str.upper() == 'ACTIVE'].copy()
+        else:
+            df_routes = pd.DataFrame()
         xls.close()
         
         if not df_veh.empty:
@@ -95,7 +102,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             df_veh['Supplier Code'] = df_veh['BMC ID'].astype(str).map(bmc_supp_code_map)
             
             with pd.ExcelWriter(output_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-                df_veh.to_excel(writer, sheet_name='BMC Vehicle Allocation', index=False)
+                df_veh.to_excel(writer, sheet_name=veh_sheet, index=False)
             
         # Parse data formats
         result_doc = {"jobId": request_id, "createdAt": datetime.utcnow()}
@@ -220,7 +227,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 format_3.append(veh_data)
         result_doc['supplierVehicles'] = format_3
         
-        # 4, 5, 6, 7, 8 from 'Routes' or 'Hub To Plant'
+        # 4, 5, 6, 7, 8 from 'Routes (Max Utilized)'
         format_4 = []
         format_5 = []
         format_6 = []
