@@ -555,9 +555,9 @@ async def poll_requests():
             df_distance = pd.DataFrame(dist_list).drop_duplicates() if dist_list else pd.DataFrame(columns=["BMC Code", "Plant Code", "Distance", "Supplier", "Supplier Code", "Remark"])
             
             import random
-            # if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
-            #     zero_dist_mask = df_distance['Distance'] == 0.0
-            #     df_distance.loc[zero_dist_mask, 'Distance'] = [random.randint(50, 100) for _ in range(zero_dist_mask.sum())]
+            if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
+                zero_dist_mask = df_distance['Distance'] == 0.0
+                df_distance.loc[zero_dist_mask, 'Distance'] = [random.randint(50, 100) for _ in range(zero_dist_mask.sum())]
             
             if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
                 zero_dist_rows = []
