@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from bson import ObjectId
 from pymongo import ReturnDocument
@@ -126,4 +126,15 @@ class RequestService:
                 "$lte": end_date
             }
         }
-        return await self.opt_repository.get_all(query, sort_by="createdOn", sort_order=-1)
+        results = await self.opt_repository.get_all(query, sort_by="createdOn", sort_order=-1)
+        for req in results:
+            if "createdOn" in req and req["createdOn"] is not None:
+                if isinstance(req["createdOn"], datetime):
+                    req["createdOn"] = req["createdOn"] + timedelta(hours=5, minutes=30)
+                elif isinstance(req["createdOn"], str):
+                    try:
+                        dt = datetime.fromisoformat(req["createdOn"].replace("Z", "+00:00"))
+                        req["createdOn"] = (dt + timedelta(hours=5, minutes=30)).isoformat()
+                    except (ValueError, TypeError):
+                        pass
+        return results

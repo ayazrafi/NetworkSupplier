@@ -560,9 +560,19 @@ async def poll_requests():
             #     df_distance.loc[zero_dist_mask, 'Distance'] = [random.randint(50, 100) for _ in range(zero_dist_mask.sum())]
             
             if not df_distance.empty and (df_distance['Distance'] == 0.0).any():
-                zero_dist_rows = df_distance[df_distance['Distance'] == 0.0]
-                error_msg = f"Zero distance found for rows: {zero_dist_rows.to_dict('records')}"
-                raise ValueError(error_msg)
+                zero_dist_rows = []
+                for row in df_distance[df_distance['Distance'] == 0.0].to_dict('records'):
+                    zero_dist_rows.append({str(k): (v.item() if hasattr(v, 'item') else (None if pd.isna(v) else v)) for k, v in row.items()})
+                await opt_repo.collection.update_one(
+                    {"requestId": request_id},
+                    {"$set": {
+                        "status": "Failed",
+                        "completedOn": datetime.utcnow(),
+                        "error": {"distanceMapping": zero_dist_rows}
+                    }}
+                )
+                print(f"Request {request_id} failed: zero distance found in distance mapping.")
+                continue
             
             v_alloc_data = []
             supplier_codes = list(set([m["supplierCode"] for m in req_mmcs]))
