@@ -36,7 +36,7 @@ class PlantFixedDemandInput(BaseModel):
 class RequestConstraintInput(BaseModel):
     supplierCode: str
     isLenient: Optional[bool] = None
-    bmcMinQuantitySupply: Optional[BmcMinQuantitySupplyInput] = None
+    bmcMinQuantitySupply: Optional[List[BmcMinQuantitySupplyInput]] = []
     plantFixedDemand: Optional[PlantFixedDemandInput] = None
 
 class RequestProductConfigurationInput(BaseModel):
