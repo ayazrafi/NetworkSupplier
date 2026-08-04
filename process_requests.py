@@ -17,7 +17,9 @@ from src.repositories.request import (
     RequestMMCsRepository,
     RequestVehiclesRepository,
     RequestSettingsRepository,
-    RequestPlantSupplierMappingRepository
+    RequestPlantSupplierMappingRepository,
+    RequestConstraintsRepository,
+    RequestProductConfigurationsRepository
 )
 from src.repositories.result import OptimizerRequestResultRepository
 
@@ -445,6 +447,8 @@ async def poll_requests():
     vehicles_repo = RequestVehiclesRepository()
     settings_repo = RequestSettingsRepository()
     mapping_repo = RequestPlantSupplierMappingRepository()
+    constraints_repo = RequestConstraintsRepository()
+    product_config_repo = RequestProductConfigurationsRepository()
     
     print("Background worker started. Polling for pending requests...")
     is_paused = False
@@ -483,6 +487,8 @@ async def poll_requests():
             req_mmcs = await mmc_repo.collection.find({"requestId": request_id}).to_list(length=None)
             req_vehicles = await vehicles_repo.collection.find({"requestId": request_id}).to_list(length=None)
             req_mappings = await mapping_repo.collection.find({"requestId": request_id}).to_list(length=None)
+            req_constraints = await constraints_repo.collection.find({"requestId": request_id}).to_list(length=None)
+            req_product_config = await product_config_repo.collection.find({"requestId": request_id}).to_list(length=None)
             
             master_data = fetch_master_data()
             master_dict = {str(d.get('code')): d for d in master_data}

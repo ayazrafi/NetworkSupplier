@@ -23,3 +23,11 @@ class RequestSettingsRepository(BaseRepository):
 class RequestPlantSupplierMappingRepository(BaseRepository):
     def __init__(self):
         super().__init__("RequestPlantSupplierMappings")
+
+class RequestConstraintsRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("RequestConstraints")
+
+class RequestProductConfigurationsRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("RequestProductConfigurations")

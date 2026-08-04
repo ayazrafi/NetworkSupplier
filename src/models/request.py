@@ -23,6 +23,27 @@ class RequestPlantSupplierMappingInput(BaseModel):
     supplierCode: str
     productCode: str
 
+class BmcMinQuantitySupplyInput(BaseModel):
+    product: str
+    value: float
+
+class PlantFixedDemandInput(BaseModel):
+    product: str
+    type: str
+    plantCode: str
+    value: float
+
+class RequestConstraintInput(BaseModel):
+    supplierCode: str
+    isLenient: Optional[bool] = None
+    bmcMinQuantitySupply: Optional[BmcMinQuantitySupplyInput] = None
+    plantFixedDemand: Optional[PlantFixedDemandInput] = None
+
+class RequestProductConfigurationInput(BaseModel):
+    product: str
+    derivedFrom: str
+    canBeConvert: str
+
 class RequestCreateInput(BaseModel):
     requestName: str
     plants: List[RequestPlantInput]
@@ -31,6 +52,8 @@ class RequestCreateInput(BaseModel):
     plantSupplierMapping: List[RequestPlantSupplierMappingInput]
     maxDistance: int
     leaveQuantity: int = 0
+    constraints: Optional[List[RequestConstraintInput]] = []
+    productConfiguration: Optional[List[RequestProductConfigurationInput]] = []
 
 class OptimizationRequestResponse(BaseModel):
     requestId: str

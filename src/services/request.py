@@ -10,7 +10,9 @@ from src.repositories.request import (
     RequestMMCsRepository,
     RequestVehiclesRepository,
     RequestSettingsRepository,
-    RequestPlantSupplierMappingRepository
+    RequestPlantSupplierMappingRepository,
+    RequestConstraintsRepository,
+    RequestProductConfigurationsRepository
 )
 
 class RequestService:
@@ -21,6 +23,8 @@ class RequestService:
         self.vehicles_repository = RequestVehiclesRepository()
         self.settings_repository = RequestSettingsRepository()
         self.mapping_repository = RequestPlantSupplierMappingRepository()
+        self.constraints_repository = RequestConstraintsRepository()
+        self.product_config_repository = RequestProductConfigurationsRepository()
 
     async def _generate_request_id(self) -> str:
         db = DatabaseConnection.get_db()
@@ -116,6 +120,32 @@ class RequestService:
         ]
         if mapping_docs:
             await self.mapping_repository.collection.insert_many(mapping_docs)
+
+        # 7. Save Request Constraints
+        if request_in.constraints:
+            constraint_docs = [
+                {
+                    "requestId": request_id,
+                    "OptimizationRequestId": opt_req_id,
+                    **c.model_dump()
+                }
+                for c in request_in.constraints
+            ]
+            if constraint_docs:
+                await self.constraints_repository.collection.insert_many(constraint_docs)
+
+        # 8. Save Request Product Configurations
+        if request_in.productConfiguration:
+            product_config_docs = [
+                {
+                    "requestId": request_id,
+                    "OptimizationRequestId": opt_req_id,
+                    **p.model_dump()
+                }
+                for p in request_in.productConfiguration
+            ]
+            if product_config_docs:
+                await self.product_config_repository.collection.insert_many(product_config_docs)
 
         return created_opt_req
 
