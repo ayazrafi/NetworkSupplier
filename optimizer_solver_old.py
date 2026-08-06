@@ -6,194 +6,15 @@ import datetime
 import threading
 import random
 import pandas as pd
-from flask import Flask, request, jsonify, send_from_directory, send_file
-from flask_cors import CORS
-from pymongo import MongoClient
-from werkzeug.utils import secure_filename
-
-app = Flask(__name__, static_folder='static', static_url_path='')
-CORS(app)
-
-# MongoDB connection string configured for localhost:27018
-MONGO_URI = os.environ.get("MONGO_URI", "mongodb://mfimongomaster:mongomongo%26*(@localhost:27018/")
-DB_NAME = os.environ.get("MONGO_DB", "supplier_network")
-
-client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
-db = client[DB_NAME]
-nodes_collection = db["nodes"]
-jobs_collection = db["jobs"]
-
-db_available = True
-try:
-    client.server_info()  # Ping the database
-    print(f"Connected to MongoDB at {MONGO_URI}")
-except Exception as e:
-    print(f"WARNING: Could not connect to MongoDB. Falling back to in-memory storage. Error: {e}")
-    db_available = False
-
 in_memory_jobs = []
 
 MAX_DISTANCE_LIMIT = 800.0
-
-in_memory_nodes = []
-
-
-import urllib.request
-import json
-
 _distance_cache = {}
-
-
-
-
-# Directory setup for Excel jobs
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'outputs')
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+OUTPUT_FOLDER = 'outputs'
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 
 
-
-
-# Excel random network generator containing 1000 nodes and UUID network_id
-def generate_random_network():
-    network_id = str(uuid.uuid4())
-    rows = []
-    
-    # 200 Hubs
-    for i in range(1, 201):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        subtype = random.choice(['BMC', 'MCC', 'VLCC'])
-        # Cow Milk
-        rows.append({
-            'node_id': f"H{i}",
-            'name': f"Hub {i}",
-            'type': 'hub',
-            'subtype': subtype,
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Milk',
-            'capacity': random.randint(8000, 20000),
-            'cost': round(random.uniform(0.10, 0.25), 2),
-            'network_id': network_id
-        })
-        # Buffalo Milk
-        rows.append({
-            'node_id': f"H{i}",
-            'name': f"Hub {i}",
-            'type': 'hub',
-            'subtype': subtype,
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Milk',
-            'capacity': random.randint(5000, 15000),
-            'cost': round(random.uniform(0.15, 0.30), 2),
-            'network_id': network_id
-        })
-        
-    # 100 Plants
-    for i in range(1, 101):
-        lat = round(random.uniform(21.5, 23.5), 4)
-        lng = round(random.uniform(71.0, 73.5), 4)
-        
-        # Raw cow milk capacity
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Milk',
-            'capacity': random.randint(15000, 40000),
-            'cost': round(random.uniform(0.30, 0.50), 2),
-            'network_id': network_id
-        })
-        # Raw buffalo milk capacity
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Milk',
-            'capacity': random.randint(10000, 30000),
-            'cost': round(random.uniform(0.40, 0.60), 2),
-            'network_id': network_id
-        })
-        # Cow Cheese yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Cheese',
-            'yield': 0.10,
-            'network_id': network_id
-        })
-        # Cow Liquid Milk yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Liquid Milk',
-            'yield': 1.0,
-            'network_id': network_id
-        })
-        # Buffalo Cheese yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Cheese',
-            'yield': 0.10,
-            'network_id': network_id
-        })
-        # Cow Khoya yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Cow Khoya',
-            'yield': 0.20,
-            'network_id': network_id
-        })
-        # Buffalo Butter yield
-        rows.append({
-            'node_id': f"P{i}",
-            'name': f"Plant {i}",
-            'type': 'plant',
-            'subtype': '',
-            'lat': lat,
-            'lng': lng,
-            'commodity': 'Buffalo Butter',
-            'yield': 0.06,
-            'network_id': network_id
-        })
-        
-
-    df = pd.DataFrame(rows)
-    all_cols = [
-        'node_id', 'name', 'type', 'subtype', 'lat', 'lng', 
-        'commodity', 'supply', 'capacity', 'cost', 'yield', 'demand', 'price', 
-        'network_id'
-    ]
-    df = df.reindex(columns=all_cols)
-    return df
 
 
 def parse_excel_nodes(file_path_or_df):
@@ -313,103 +134,15 @@ def parse_excel_nodes(file_path_or_df):
         nodes.append(node)
     return nodes
 
-
-# Jobs DB Helpers supporting MongoDB / in-memory fallback
-def get_all_jobs():
-    if db_available:
-        try:
-            return list(db['jobs'].find({}).sort('created_at', -1))
-        except Exception as e:
-            print("Error listing jobs from MongoDB:", e)
-    return sorted(in_memory_jobs, key=lambda x: x.get('created_at', ''), reverse=True)
-
-def save_new_job(job):
-    if db_available:
-        try:
-            db['jobs'].insert_one(job)
-            return
-        except Exception as e:
-            print("Error inserting job to MongoDB:", e)
-    in_memory_jobs.append(job)
-
-def update_job_status(job_id, status):
-    if db_available:
-        try:
-            db['jobs'].update_one({'job_id': job_id}, {'$set': {'status': status}})
-            return
-        except Exception as e:
-            print("Error updating status in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = status
-            break
-
-def update_job_completed(job_id, output_filename, summary):
-    completed_at = datetime.datetime.now().isoformat()
-    if db_available:
-        try:
-            db['jobs'].update_one(
-                {'job_id': job_id}, 
-                {'$set': {
-                    'status': 'COMPLETED', 
-                    'output_filename': output_filename, 
-                    'result_summary': summary,
-                    'completed_at': completed_at
-                }}
-            )
-            return
-        except Exception as e:
-            print("Error updating job completed in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = 'COMPLETED'
-            j['output_filename'] = output_filename
-            j['result_summary'] = summary
-            j['completed_at'] = completed_at
-            break
-
-def update_job_failed(job_id, error_message):
-    completed_at = datetime.datetime.now().isoformat()
-    if db_available:
-        try:
-            db['jobs'].update_one(
-                {'job_id': job_id}, 
-                {'$set': {
-                    'status': 'FAILED', 
-                    'error_message': error_message,
-                    'completed_at': completed_at
-                }}
-            )
-            return
-        except Exception as e:
-            print("Error updating job failed in MongoDB:", e)
-    for j in in_memory_jobs:
-        if j['job_id'] == job_id:
-            j['status'] = 'FAILED'
-            j['error_message'] = error_message
-            j['completed_at'] = completed_at
-            break
-
-
-
-
 # Helper to determine raw milk type from finished product type
-def get_milk_type_for_product(product_type, product_milk_map=None):
+def get_milk_type_for_product(product_type):
     ptype = (product_type or '').strip()
-    # Dynamic lookup from ProductMilkMapping sheet if available
-    if product_milk_map and ptype in product_milk_map:
-        return product_milk_map[ptype]
-    # Fallback: hardcoded logic
     if ptype.endswith(' Cheese'):
         return ptype[:-7] + ' Milk'
     ptype_lower = ptype.lower()
     if 'buffalo' in ptype_lower:
         return 'Buffalo Milk'
     return 'Cow Milk'
-
-@app.route('/')
-def serve_index():
-    return send_from_directory(app.static_folder, 'index.html')
 
 # Helper to serialize MongoDB object
 def serialize_node(node):
@@ -418,100 +151,6 @@ def serialize_node(node):
         node_dict['_id'] = str(node_dict['_id'])
     return node_dict
 
-@app.route('/api/nodes', methods=['GET'])
-def get_nodes():
-    # Only return interactive nodes (no network_id or empty network_id) to prevent map performance bottlenecks
-    query = {'$or': [{'network_id': {'$exists': False}}, {'network_id': ''}, {'network_id': None}]}
-    if db_available:
-        try:
-            db_nodes = list(nodes_collection.find(query))
-            return jsonify([serialize_node(n) for n in db_nodes])
-        except Exception as e:
-            print(f"Error fetching from MongoDB: {e}")
-    interactive_nodes = [n for n in in_memory_nodes if not n.get('network_id')]
-    return jsonify(interactive_nodes)
-
-@app.route('/api/nodes', methods=['POST'])
-def add_node():
-    new_node = request.json
-    if not new_node or 'id' not in new_node:
-        return jsonify({'status': 'ERROR', 'message': 'Invalid node data'}), 400
-        
-    # Remove _id to prevent modification of the immutable _id field in MongoDB
-    new_node.pop('_id', None)
-
-    if db_available:
-        try:
-            if nodes_collection.count_documents({'id': new_node['id']}) > 0:
-                nodes_collection.replace_one({'id': new_node['id']}, new_node)
-            else:
-                nodes_collection.insert_one(new_node)
-            saved_node = nodes_collection.find_one({'id': new_node['id']})
-            return jsonify(serialize_node(saved_node)), 201
-        except Exception as e:
-            print(f"Error inserting into MongoDB: {e}")
-            
-    existing_idx = next((i for i, n in enumerate(in_memory_nodes) if n['id'] == new_node['id']), None)
-    if existing_idx is not None:
-        in_memory_nodes[existing_idx] = new_node
-    else:
-        in_memory_nodes.append(new_node)
-    return jsonify(new_node), 201
-
-@app.route('/api/nodes/<node_id>', methods=['PUT'])
-def update_node(node_id):
-    updated_data = request.json
-    if not updated_data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'}), 400
-        
-    updated_data['id'] = node_id
-    
-    # Remove _id to prevent modification of the immutable _id field in MongoDB
-    updated_data.pop('_id', None)
-
-    if db_available:
-        try:
-            nodes_collection.replace_one({'id': node_id}, updated_data, upsert=True)
-            saved_node = nodes_collection.find_one({'id': node_id})
-            return jsonify(serialize_node(saved_node))
-        except Exception as e:
-            print(f"Error updating MongoDB: {e}")
-
-    existing_idx = next((i for i, n in enumerate(in_memory_nodes) if n['id'] == node_id), None)
-    if existing_idx is not None:
-        in_memory_nodes[existing_idx] = updated_data
-    else:
-        in_memory_nodes.append(updated_data)
-    return jsonify(updated_data)
-
-@app.route('/api/nodes/<node_id>', methods=['DELETE'])
-def delete_node(node_id):
-    if db_available:
-        try:
-            nodes_collection.delete_one({'id': node_id})
-            return jsonify({'status': 'SUCCESS'})
-        except Exception as e:
-            print(f"Error deleting from MongoDB: {e}")
-
-    global in_memory_nodes
-    in_memory_nodes = [n for n in in_memory_nodes if n['id'] != node_id]
-    return jsonify({'status': 'SUCCESS'})
-
-@app.route('/api/nodes/reset', methods=['POST'])
-def reset_nodes():
-    # Only reset/delete interactive nodes, keeping the bulk jobs database nodes intact
-    query = {'$or': [{'network_id': {'$exists': False}}, {'network_id': ''}, {'network_id': None}]}
-    if db_available:
-        try:
-            nodes_collection.delete_many(query)
-            db_nodes = list(nodes_collection.find(query))
-            return jsonify([serialize_node(n) for n in db_nodes])
-        except Exception as e:
-            print(f"Error resetting MongoDB: {e}")
-
-    global in_memory_nodes
-    in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id')]
-    return jsonify([])
 
 
 def get_optimal_vehicles(flow, vehicle_limits, caps=None, caps_ranges=None, **kwargs):
@@ -644,309 +283,6 @@ def parse_plant_bmc_mapping(excel_file_path):
         print(f"Error parsing Plant_BMC_Mapping (may not exist): {e}")
     return mapping
 
-
-def parse_milk_wise_split(excel_file_path):
-    """
-    Parse MilkWiseSplit sheet from Excel with columns: Supplier, MilkType, MinQuantity.
-    Returns a dictionary mapping (supplier_str, milk_type_str) -> MinQuantity (float).
-    The MinQuantity applies to ALL BMCs belonging to that supplier.
-    """
-    split_limits = {}
-    if not excel_file_path or not os.path.exists(excel_file_path):
-        return split_limits
-    try:
-        xl = pd.ExcelFile(excel_file_path)
-        sheet_name = next((s for s in xl.sheet_names if 'milk' in str(s).lower() and 'split' in str(s).lower()), 'MilkWiseSplit')
-        if sheet_name in xl.sheet_names:
-            df = xl.parse(sheet_name)
-            sup_col = next((c for c in df.columns if 'supplier' in str(c).lower()), 'Supplier')
-            type_col = next((c for c in df.columns if 'type' in str(c).lower() or 'milk' in str(c).lower()), 'MilkType')
-            qty_col = next((c for c in df.columns if 'qty' in str(c).lower() or 'quantity' in str(c).lower() or 'min' in str(c).lower()), 'MinQuantity')
-
-            for _, row in df.iterrows():
-                supplier_val = str(row.get(sup_col, '')).strip() if pd.notna(row.get(sup_col)) else ''
-                milk_val = str(row.get(type_col, '')).strip() if pd.notna(row.get(type_col)) else ''
-                qty_val = row.get(qty_col)
-                if supplier_val and milk_val and pd.notna(qty_val):
-                    try:
-                        min_q = float(qty_val)
-                        split_limits[(supplier_val, milk_val)] = min_q
-                        split_limits[(supplier_val, milk_val.lower())] = min_q
-                    except ValueError:
-                        pass
-            print(f"Loaded MilkWiseSplit thresholds for {len(split_limits)//2} supplier-milk combinations")
-    except Exception as e:
-        print(f"Error parsing MilkWiseSplit (may not exist): {e}")
-    return split_limits
-
-
-def parse_milk_config(excel_file_path):
-    """
-    Parse MilkConfig sheet from Excel with columns:
-    MilkType, Priority, Group, Aliases, TransportBonusFactor, IsRawMilk.
-    Returns (milk_config_dict, alias_map).
-    milk_config_dict: {milk_type_str -> {priority, group, aliases, transport_bonus_factor, is_raw_milk}}
-    alias_map: {alias_str -> canonical_milk_type_str}
-    Falls back to hardcoded defaults if sheet is missing.
-    """
-    # Hardcoded fallback defaults matching current app behavior
-    default_config = {
-        'BM': {'priority': 1, 'group': 'buffalo', 'aliases': ['Buffalo Milk', 'BM'], 'transport_bonus_factor': 0.6, 'is_raw_milk': True},
-        'CM': {'priority': 2, 'group': 'cow', 'aliases': ['Cow Milk', 'CM'], 'transport_bonus_factor': 0.0, 'is_raw_milk': True},
-        'FCM': {'priority': 3, 'group': 'fcm', 'aliases': ['FCM', 'Full Cream Milk'], 'transport_bonus_factor': 0.4, 'is_raw_milk': True},
-        'MM': {'priority': 4, 'group': 'mixed', 'aliases': ['Mixed Milk', 'MM'], 'transport_bonus_factor': 0.2, 'is_raw_milk': True},
-        'Cow Cheese': {'priority': 5, 'group': 'cow', 'aliases': [], 'transport_bonus_factor': 0.0, 'is_raw_milk': False},
-        'Cow Liquid Milk': {'priority': 6, 'group': 'cow', 'aliases': [], 'transport_bonus_factor': 0.0, 'is_raw_milk': False},
-        'Buffalo Cheese': {'priority': 7, 'group': 'buffalo', 'aliases': [], 'transport_bonus_factor': 0.0, 'is_raw_milk': False},
-        'Cow Khoya': {'priority': 8, 'group': 'cow', 'aliases': [], 'transport_bonus_factor': 0.0, 'is_raw_milk': False},
-        'Buffalo Butter': {'priority': 9, 'group': 'buffalo', 'aliases': [], 'transport_bonus_factor': 0.0, 'is_raw_milk': False},
-    }
-
-    def build_alias_map(config):
-        amap = {}
-        for mtype, info in config.items():
-            amap[mtype.lower()] = mtype
-            for alias in info.get('aliases', []):
-                amap[alias.strip().lower()] = mtype
-        return amap
-
-    if not excel_file_path or not os.path.exists(excel_file_path):
-        return default_config, build_alias_map(default_config)
-    try:
-        xl = pd.ExcelFile(excel_file_path)
-        sheet_name = next((s for s in xl.sheet_names if 'milkconfig' in str(s).lower().replace(' ', '').replace('_', '')), None)
-        if not sheet_name:
-            return default_config, build_alias_map(default_config)
-
-        df = xl.parse(sheet_name)
-        type_col = next((c for c in df.columns if 'milktype' in str(c).lower().replace(' ', '').replace('_', '') or str(c).lower().strip() == 'milktype'), df.columns[0])
-        priority_col = next((c for c in df.columns if 'priority' in str(c).lower()), None)
-        group_col = next((c for c in df.columns if 'group' in str(c).lower()), None)
-        aliases_col = next((c for c in df.columns if 'alias' in str(c).lower()), None)
-        bonus_col = next((c for c in df.columns if 'bonus' in str(c).lower() or 'factor' in str(c).lower()), None)
-        raw_col = next((c for c in df.columns if 'raw' in str(c).lower()), None)
-
-        config = {}
-        for _, row in df.iterrows():
-            mtype = str(row[type_col]).strip()
-            if not mtype or mtype.lower() == 'nan':
-                continue
-            priority = int(row[priority_col]) if priority_col and pd.notna(row.get(priority_col)) else len(config) + 1
-            group = str(row[group_col]).strip().lower() if group_col and pd.notna(row.get(group_col)) else mtype.lower()
-            aliases_raw = str(row[aliases_col]).strip() if aliases_col and pd.notna(row.get(aliases_col)) else ''
-            aliases = [a.strip() for a in aliases_raw.split(',') if a.strip() and a.strip().lower() != 'nan']
-            bonus_factor = float(row[bonus_col]) if bonus_col and pd.notna(row.get(bonus_col)) else 0.0
-            is_raw = True
-            if raw_col and pd.notna(row.get(raw_col)):
-                raw_val = str(row[raw_col]).strip().lower()
-                is_raw = raw_val in ('yes', 'true', '1', 'y')
-
-            config[mtype] = {
-                'priority': priority,
-                'group': group,
-                'aliases': aliases,
-                'transport_bonus_factor': bonus_factor,
-                'is_raw_milk': is_raw
-            }
-
-        if not config:
-            return default_config, build_alias_map(default_config)
-
-        print(f"Loaded MilkConfig with {len(config)} milk types from sheet '{sheet_name}'")
-        return config, build_alias_map(config)
-    except Exception as e:
-        print(f"Error parsing MilkConfig (using defaults): {e}")
-        return default_config, build_alias_map(default_config)
-
-
-def parse_milk_substitution(excel_file_path):
-    """
-    Parse MilkSubstitution sheet from Excel with columns:
-    FromMilk, ToMilk, ConversionFactor, Priority, Penalty.
-    Returns a list of substitution rules sorted by Priority.
-    Falls back to hardcoded BM->FCM, FCM->MM chain if sheet is missing.
-    """
-    default_subs = [
-        {'from': 'BM', 'to': 'FCM', 'factor': 1.0, 'priority': 1, 'penalty': 10.0},
-        {'from': 'FCM', 'to': 'MM', 'factor': 1.0, 'priority': 2, 'penalty': 10.0},
-    ]
-
-    if not excel_file_path or not os.path.exists(excel_file_path):
-        return default_subs
-    try:
-        xl = pd.ExcelFile(excel_file_path)
-        sheet_name = next((s for s in xl.sheet_names if 'milksubstitution' in str(s).lower().replace(' ', '').replace('_', '') or ('milk' in str(s).lower() and 'sub' in str(s).lower())), None)
-        if not sheet_name:
-            return default_subs
-
-        df = xl.parse(sheet_name)
-        from_col = next((c for c in df.columns if 'from' in str(c).lower()), df.columns[0])
-        to_col = next((c for c in df.columns if str(c).lower().startswith('to') or 'tomilk' in str(c).lower().replace(' ', '').replace('_', '')), df.columns[1])
-        factor_col = next((c for c in df.columns if 'factor' in str(c).lower() or 'conversion' in str(c).lower()), None)
-        priority_col = next((c for c in df.columns if 'priority' in str(c).lower()), None)
-        penalty_col = next((c for c in df.columns if 'penalty' in str(c).lower()), None)
-
-        subs = []
-        for _, row in df.iterrows():
-            from_milk = str(row[from_col]).strip()
-            to_milk = str(row[to_col]).strip()
-            if not from_milk or not to_milk or from_milk.lower() == 'nan' or to_milk.lower() == 'nan':
-                continue
-            factor = float(row[factor_col]) if factor_col and pd.notna(row.get(factor_col)) else 1.0
-            priority = int(row[priority_col]) if priority_col and pd.notna(row.get(priority_col)) else len(subs) + 1
-            penalty = float(row[penalty_col]) if penalty_col and pd.notna(row.get(penalty_col)) else 10.0
-            subs.append({
-                'from': from_milk,
-                'to': to_milk,
-                'factor': factor,
-                'priority': priority,
-                'penalty': penalty
-            })
-
-        if not subs:
-            return default_subs
-
-        subs.sort(key=lambda x: x['priority'])
-        print(f"Loaded {len(subs)} milk substitution rules from sheet '{sheet_name}'")
-        return subs
-    except Exception as e:
-        print(f"Error parsing MilkSubstitution (using defaults): {e}")
-        return default_subs
-
-
-def parse_product_milk_mapping_sheet(excel_file_path):
-    """
-    Parse ProductMilkMapping sheet from Excel with columns: Product, RawMilkType.
-    Returns a dict mapping product_name -> raw_milk_type.
-    Falls back to hardcoded defaults if sheet is missing.
-    """
-    default_map = {
-        'Cow Cheese': 'CM',
-        'Cow Liquid Milk': 'CM',
-        'Cow Khoya': 'CM',
-        'Buffalo Cheese': 'BM',
-        'Buffalo Butter': 'BM',
-    }
-
-    if not excel_file_path or not os.path.exists(excel_file_path):
-        return default_map
-    try:
-        xl = pd.ExcelFile(excel_file_path)
-        sheet_name = next((s for s in xl.sheet_names if 'productmilkmapping' in str(s).lower().replace(' ', '').replace('_', '') or ('product' in str(s).lower() and 'milk' in str(s).lower() and 'map' in str(s).lower())), None)
-        if not sheet_name:
-            return default_map
-
-        df = xl.parse(sheet_name)
-        prod_col = next((c for c in df.columns if 'product' in str(c).lower()), df.columns[0])
-        raw_col = next((c for c in df.columns if 'raw' in str(c).lower() or 'milk' in str(c).lower()), df.columns[1])
-
-        mapping = {}
-        for _, row in df.iterrows():
-            product = str(row[prod_col]).strip()
-            raw_milk = str(row[raw_col]).strip()
-            if product and raw_milk and product.lower() != 'nan' and raw_milk.lower() != 'nan':
-                mapping[product] = raw_milk
-
-        if not mapping:
-            return default_map
-
-        print(f"Loaded {len(mapping)} product-to-milk mappings from sheet '{sheet_name}'")
-        return mapping
-    except Exception as e:
-        print(f"Error parsing ProductMilkMapping (using defaults): {e}")
-        return default_map
-
-
-def milk_group_matches(m_str, target_milk, milk_config, alias_map=None):
-    """
-    Check if milk type m_str matches target_milk based on MilkConfig groups.
-    Uses alias_map to resolve canonical names, then compares groups.
-    Returns True if they match (same milk type or same group).
-    """
-    if not target_milk:
-        return True
-    m_lower = str(m_str).strip().lower()
-    t_lower = str(target_milk).strip().lower()
-    if m_lower == t_lower:
-        return True
-
-    # Resolve canonical names via alias_map
-    m_canonical = alias_map.get(m_lower, m_str) if alias_map else m_str
-    t_canonical = alias_map.get(t_lower, target_milk) if alias_map else target_milk
-
-    if str(m_canonical).lower() == str(t_canonical).lower():
-        return True
-
-    # Compare groups
-    m_group = milk_config.get(m_canonical, {}).get('group', '')
-    t_group = milk_config.get(t_canonical, {}).get('group', '')
-    if m_group and t_group and m_group == t_group:
-        return True
-
-    return False
-
-
-def get_default_inflow_milks(capacity=10000, processing_cost=0.50, milk_types=None, milk_config=None):
-    if milk_types:
-        return [{'type': m, 'capacity': capacity, 'processing_cost': processing_cost} for m in sorted(list(milk_types))]
-    if milk_config:
-        raw_types = [m for m, cfg in milk_config.items() if cfg.get('is_raw_milk', True)]
-        if raw_types:
-            return [{'type': m, 'capacity': capacity, 'processing_cost': processing_cost} for m in sorted(raw_types)]
-    return [
-        {'type': 'Cow Milk', 'capacity': capacity, 'processing_cost': processing_cost},
-        {'type': 'Buffalo Milk', 'capacity': capacity, 'processing_cost': processing_cost}
-    ]
-
-
-def parse_supplier_plant_consumption(excel_file_path):
-    """
-    Parse SupplierPlantConsumption sheet from Excel with columns:
-    Supplier, Plant, MilkType (optional), Type (Percentage or Fixed), Value.
-    Returns a list of dictionaries:
-    [{'supplier': str, 'plant': str, 'milk_type': str, 'type': 'Percentage'|'Fixed', 'value': float}, ...]
-    """
-    consumption_rules = []
-    if not excel_file_path or not os.path.exists(excel_file_path):
-        return consumption_rules
-    try:
-        xl = pd.ExcelFile(excel_file_path)
-        sheet_name = next((s for s in xl.sheet_names if 'supplier' in str(s).lower() and 'plant' in str(s).lower() and ('cons' in str(s).lower() or 'consumption' in str(s).lower())), 'SupplierPlantConsumption')
-        if sheet_name in xl.sheet_names:
-            df = xl.parse(sheet_name)
-            sup_col = next((c for c in df.columns if 'supplier' in str(c).lower()), 'Supplier')
-            plant_col = next((c for c in df.columns if 'plant' in str(c).lower()), 'Plant')
-            milk_col = next((c for c in df.columns if 'milk' in str(c).lower() or 'commodity' in str(c).lower() or 'prod' in str(c).lower()), 'MilkType')
-            type_col = next((c for c in df.columns if 'type' in str(c).lower() and c != milk_col), 'Type')
-            val_col = next((c for c in df.columns if 'val' in str(c).lower() or 'qty' in str(c).lower() or 'percent' in str(c).lower() or 'quantity' in str(c).lower()), 'Value')
-
-            for _, row in df.iterrows():
-                supplier_val = str(row.get(sup_col, '')).strip() if pd.notna(row.get(sup_col)) else ''
-                plant_val = str(row.get(plant_col, '')).strip() if pd.notna(row.get(plant_col)) else ''
-                type_val = str(row.get(type_col, '')).strip().capitalize() if pd.notna(row.get(type_col)) else 'Fixed'
-                val_num = row.get(val_col)
-                milk_val = str(row.get(milk_col, '')).strip() if (milk_col in df.columns and pd.notna(row.get(milk_col))) else ''
-                if milk_val.lower() in ('all', 'any', 'none', 'nan', ''):
-                    milk_val = ''
-                if supplier_val and plant_val and pd.notna(val_num):
-                    try:
-                        val_float = float(val_num)
-                        if val_float > 0:
-                            consumption_rules.append({
-                                'supplier': supplier_val,
-                                'plant': plant_val,
-                                'milk_type': milk_val,
-                                'type': 'Percentage' if 'perc' in type_val.lower() else 'Fixed',
-                                'value': val_float
-                            })
-                    except ValueError:
-                        pass
-            print(f"Loaded {len(consumption_rules)} rules from sheet '{sheet_name}'")
-    except Exception as e:
-        print(f"Error parsing SupplierPlantConsumption (may not exist): {e}")
-    return consumption_rules
-
-
 def parse_bmc_vehicles(excel_file_path):
     vehicle_limits_map = {}
     if not excel_file_path or not os.path.exists(excel_file_path):
@@ -1044,18 +380,13 @@ def parse_bmc_vehicles(excel_file_path):
                         cluster = str(row[col_cluster]).strip() if col_cluster and pd.notna(row[col_cluster]) else ""
                         subcluster = str(row[col_subcluster]).strip() if col_subcluster and pd.notna(row[col_subcluster]) else ""
                         
-                        # Parse SupplyOutSide column (Yes/No)
-                        col_supply_outside = next((c for c in df_veh.columns if 'supplyoutside' in str(c).lower().replace(' ', '').replace('_', '')), None)
-                        supply_outside = str(row[col_supply_outside]).strip().lower() if col_supply_outside and pd.notna(row.get(col_supply_outside)) else 'no'
-                        
                         vehicle_limits_map[bmc_id] = {
                             'limits': limits,
                             'strategy': strategy,
                             'margin_low': margin_low,
                             'margin_high': margin_high,
                             'cluster': cluster,
-                            'subcluster': subcluster,
-                            'supply_outside': supply_outside == 'yes'
+                            'subcluster': subcluster
                         }
             print(f"Loaded vehicle limits for {len(vehicle_limits_map)-1} Suppliers from Excel")
     except Exception as e:
@@ -1064,238 +395,8 @@ def parse_bmc_vehicles(excel_file_path):
     return vehicle_limits_map
 
 
-class ResolvedFlow:
-    """Simple wrapper to replace solver numerical variables with mutable floating point values."""
-    def __init__(self, val):
-        self._val = float(val)
-    def solution_value(self):
-        return self._val
-
-
-def _get_plant_demand_map(plants, milk_types, flow_h_p, hubs, protected_plant_milks=None):
-    """Calculate target demands, total received volume, surplus pools, and zero-supply targets."""
-    plant_demands = {}
-    plant_received = {}
-    zero_targets = []
-    plant_surplus = {}
-
-    for p in plants:
-        p_id = p['id']
-        p_demands_list = p.get('demands', [])
-        d_dict = {d['type']: d.get('demand', 0.0) for d in p_demands_list if 'type' in d}
-        in_milks = p.get('inflow_milks', [])
-        if not in_milks:
-            if p_demands_list:
-                in_milks = [{'type': d['type'], 'capacity': d['demand']} for d in p_demands_list]
-            else:
-                in_milks = get_default_inflow_milks(p.get('capacity', 10000), 0.50, milk_types=milk_types)
-        c_dict = {im['type']: im.get('capacity', 0.0) for im in in_milks if 'type' in im}
-
-        for m in milk_types:
-            if protected_plant_milks and (p_id, m) in protected_plant_milks:
-                continue
-            req = d_dict.get(m, c_dict.get(m, 0.0))
-            tot_in = sum(flow_h_p[(h['id'], p_id, m)].solution_value() for h in hubs if (h['id'], p_id, m) in flow_h_p)
-
-            plant_demands[(p_id, m)] = req
-            plant_received[(p_id, m)] = tot_in
-
-            if req > 0 and round(tot_in, 1) == 0:
-                zero_targets.append((p_id, m, req))
-
-            plant_surplus[(p_id, m)] = max(0.0, tot_in - req) if tot_in > (req + 0.1) else 0.0
-
-    return zero_targets, plant_surplus
-
-
-def _get_bmc_spare_capacity(hubs, plants, milk_types, flow_h_p):
-    """Calculate remaining untouched capacity per milk type for each BMC/Hub."""
-    bmc_spare = {}
-    for h in hubs:
-        h_id = h['id']
-        h_prods = h.get('products', [])
-        if not h_prods and 'capacity' in h:
-            h_prods = [{'type': 'Cow Milk', 'capacity': h['capacity']}]
-        h_cap_dict = {prod['type']: prod.get('capacity', 0.0) for prod in h_prods if 'type' in prod}
-
-        for m in milk_types:
-            tot_cap = h_cap_dict.get(m, 0.0)
-            outflow = sum(flow_h_p[(h_id, p_i['id'], m)].solution_value() for p_i in plants if (h_id, p_i['id'], m) in flow_h_p)
-            bmc_spare[(h_id, m)] = max(0.0, tot_cap - outflow) if (tot_cap - outflow > 0.1) else 0.0
-    return bmc_spare
-
-
-def _find_candidate_sources(target_p_id, target_p, m, hubs, plants, bmc_spare, plant_surplus, flow_h_p, get_pair_dist_func, max_dist_limit, allowed_outside_bmcs=None):
-    """Identify and distance-sort all valid surplus and spare capacity sources for a specific milk type.
-    If allowed_outside_bmcs is provided, only BMCs in this set are considered."""
-    candidates = []
-    for h in hubs:
-        h_id = h['id']
-        # If allowed_outside_bmcs is set, skip BMCs not in the allowed set
-        if allowed_outside_bmcs is not None and h_id not in allowed_outside_bmcs:
-            continue
-        dist = get_pair_dist_func(h, target_p)
-        if dist > max_dist_limit:
-            continue
-
-        sp = bmc_spare.get((h_id, m), 0.0)
-        if sp > 0.1:
-            candidates.append([h_id, 'spare', None, sp, dist])
-
-        for p_over in plants:
-            p_over_id = p_over['id']
-            if p_over_id == target_p_id:
-                continue
-            surplus = plant_surplus.get((p_over_id, m), 0.0)
-            if surplus > 0.1:
-                curr_flow = flow_h_p.get((h_id, p_over_id, m), ResolvedFlow(0.0)).solution_value()
-                extractable = min(curr_flow, surplus)
-                if extractable > 0.1:
-                    candidates.append([h_id, 'reroute', p_over_id, extractable, dist])
-
-    candidates.sort(key=lambda x: x[4])
-    return candidates
-
-
-def reallocate_surplus_flows(flow_h_p, plants, hubs, milk_types, get_pair_dist_func, max_dist_limit=800.0, allowed_outside_bmcs=None, protected_plant_milks=None):
-    """
-    Post-processing balancing routine: Reallocates excess milk from over-supplied plants
-    and unutilized BMC spare capacity to zero-supply plants based on nearest valid Distance sheet routes.
-    If allowed_outside_bmcs is provided, only those BMCs are eligible for out-of-mapping supply.
-    Returns a set of (h_id, p_id, m) keys that were created/modified as out-of-mapping reallocations.
-    """
-    reallocated_keys = set()
-
-    for key, var in list(flow_h_p.items()):
-        if not hasattr(var, '_val'):
-            flow_h_p[key] = ResolvedFlow(var.solution_value())
-
-    zero_targets, plant_surplus = _get_plant_demand_map(plants, milk_types, flow_h_p, hubs, protected_plant_milks=protected_plant_milks)
-    if not zero_targets:
-        return reallocated_keys
-
-    bmc_spare = _get_bmc_spare_capacity(hubs, plants, milk_types, flow_h_p)
-    plant_lookup = {p['id']: p for p in plants}
-
-    for target_p_id, m, needed_qty in zero_targets:
-        target_p = plant_lookup.get(target_p_id)
-        if not target_p:
-            continue
-
-        candidate_sources = _find_candidate_sources(
-            target_p_id, target_p, m, hubs, plants, bmc_spare, plant_surplus, flow_h_p, get_pair_dist_func, max_dist_limit, allowed_outside_bmcs
-        )
-
-        rem_need = needed_qty
-        for source_item in candidate_sources:
-            if rem_need <= 0.1:
-                break
-            h_id, styp, from_p_id, avail, dist = source_item
-
-            if styp == 'spare':
-                actual_avail = min(avail, bmc_spare.get((h_id, m), 0.0))
-            else:
-                curr_flow = flow_h_p.get((h_id, from_p_id, m), ResolvedFlow(0.0)).solution_value()
-                actual_avail = min(avail, curr_flow, plant_surplus.get((from_p_id, m), 0.0))
-
-            if actual_avail <= 0.1:
-                continue
-
-            transfer_qty = min(rem_need, actual_avail)
-
-            if styp == 'spare':
-                bmc_spare[(h_id, m)] -= transfer_qty
-            else:
-                existing_val = flow_h_p[(h_id, from_p_id, m)].solution_value()
-                flow_h_p[(h_id, from_p_id, m)] = ResolvedFlow(existing_val - transfer_qty)
-                plant_surplus[(from_p_id, m)] -= transfer_qty
-
-            existing_target_val = flow_h_p.get((h_id, target_p_id, m), ResolvedFlow(0.0)).solution_value()
-            flow_h_p[(h_id, target_p_id, m)] = ResolvedFlow(existing_target_val + transfer_qty)
-            reallocated_keys.add((h_id, target_p_id, m))
-
-            rem_need -= transfer_qty
-
-    return reallocated_keys
-
-
-def consolidate_small_dispatch_splits(flow_h_p, hubs, plants, milk_types, get_pair_dist_func, excel_file_path, bmc_to_supplier=None, skip_keys=None, protected_plant_milks=None):
-    """
-    Consolidate small split deliveries per supplier:
-    - Reads Supplier, MilkType, MinQuantity from the MilkWiseSplit sheet.
-    - For each BMC, finds its supplier via bmc_to_supplier mapping.
-    - For each BMC + MilkType, collects all active dispatches (excluding out-of-mapping flows).
-    - Greedily groups the smallest dispatches whose combined sum <= MinQuantity.
-    - If 2+ dispatches form a valid group, consolidates them to the nearest plant.
-    """
-    min_split_map = parse_milk_wise_split(excel_file_path)
-    if not min_split_map:
-        return
-    if not bmc_to_supplier:
-        bmc_to_supplier = {}
-
-    for key, var in list(flow_h_p.items()):
-        if not hasattr(var, '_val'):
-            flow_h_p[key] = ResolvedFlow(var.solution_value())
-
-    for h in hubs:
-        h_id = h['id']
-        # Find the supplier for this BMC
-        supplier = str(bmc_to_supplier.get(h_id, '')).strip()
-        if not supplier:
-            continue
-
-        for m in milk_types:
-            # Look up MinQuantity for this (supplier, milk_type)
-            min_q = min_split_map.get((supplier, m), min_split_map.get((supplier, str(m).lower()), None))
-            if min_q is None or min_q <= 0:
-                continue
-
-            active_dests = []
-            for p in plants:
-                p_id = p['id']
-                val = flow_h_p.get((h_id, p_id, m), ResolvedFlow(0.0)).solution_value()
-                if val > 0.1:
-                    if protected_plant_milks and (p_id, m) in protected_plant_milks:
-                        continue  # Skip routes to quota-protected plant commodities
-                    is_out_of_mapping = skip_keys and (h_id, p_id, m) in skip_keys
-                    if is_out_of_mapping:
-                        continue  # Skip out-of-mapping reallocated flows
-                    dist = get_pair_dist_func(h, p)
-                    active_dests.append((p_id, val, dist))
-
-            # Need at least 2 dispatches to consider grouping
-            if len(active_dests) >= 2:
-                # Sort by quantity ascending — greedily combine smallest first
-                active_dests.sort(key=lambda x: x[1])
-
-                merge_group = [active_dests[0]]
-                merge_total = active_dests[0][1]
-
-                for i in range(1, len(active_dests)):
-                    candidate_qty = active_dests[i][1]
-                    if (merge_total + candidate_qty) <= (min_q + 0.001):
-                        merge_group.append(active_dests[i])
-                        merge_total += candidate_qty
-
-                # If we accumulated 2+ dispatches, consolidate them to the nearest plant
-                if len(merge_group) >= 2:
-                    merge_group.sort(key=lambda x: (x[2], -x[1]))  # nearest first
-                    nearest_p_id = merge_group[0][0]
-
-                    for p_id, _, _ in merge_group:
-                        if p_id == nearest_p_id:
-                            flow_h_p[(h_id, p_id, m)] = ResolvedFlow(merge_total)
-                        else:
-                            flow_h_p[(h_id, p_id, m)] = ResolvedFlow(0.0)
-
-
-
 def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=None):
     plant_bmc_mapping = parse_plant_bmc_mapping(excel_file_path)
-    milk_config, alias_map = parse_milk_config(excel_file_path)
-    milk_subs = parse_milk_substitution(excel_file_path)
-    product_milk_map = parse_product_milk_mapping_sheet(excel_file_path)
     try:
         from ortools.linear_solver import pywraplp
     except ImportError:
@@ -1403,7 +504,7 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             if 'type' in p:
                 milk_types.add(p['type'])
     if not milk_types:
-        milk_types = {m for m, cfg in milk_config.items() if cfg.get('is_raw_milk', True)}
+        milk_types = {'Cow Milk', 'Buffalo Milk'}
     milk_types = sorted(list(milk_types))
 
     # Decision Variables
@@ -1424,7 +525,7 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             p_products = p.get('products', [])
             if not p_products and 'production_type' in p:
                 p_products = [{'type': p['production_type']}]
-            p_milk_types = {get_milk_type_for_product(prod['type'], product_milk_map) for prod in p_products if 'type' in prod}
+            p_milk_types = {get_milk_type_for_product(prod['type']) for prod in p_products if 'type' in prod}
             
             common_milk = h_types.intersection(p_milk_types.union(p_demand_types))
             if common_milk:
@@ -1514,32 +615,37 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             if p_demands:
                 inflow_milks = [{'type': d['type'], 'capacity': d['demand'], 'processing_cost': d.get('processing_cost', 0.40)} for d in p_demands]
             else:
-                inflow_milks = get_default_inflow_milks(p.get('capacity', 10000), p.get('processing_cost', 0.50), milk_types=milk_types, milk_config=milk_config)
+                inflow_milks = [
+                    {'type': 'Cow Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)},
+                    {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)}
+                ]
         capacity_dict = {m['type']: m.get('capacity', 0) for m in inflow_milks if 'type' in m}
         
-        # Dynamic substitution variables from MilkSubstitution sheet
+        # Substitution variables: BM -> FCM -> MM
+        trans_BM_FCM = solver.NumVar(0, solver.infinity(), f"trans_{p['id']}_BM_to_FCM")
+        trans_FCM_MM = solver.NumVar(0, solver.infinity(), f"trans_{p['id']}_FCM_to_MM")
+        
         if 'trans_vars' not in locals():
             trans_vars = {}
-        for sub in milk_subs:
-            from_m = sub['from']
-            to_m = sub['to']
-            var_name = f"trans_{p['id']}_{from_m}_to_{to_m}"
-            t_var = solver.NumVar(0, solver.infinity(), var_name)
-            trans_vars[(p['id'], f"{from_m}_to_{to_m}")] = t_var
-            slack_vars.append(t_var * sub.get('penalty', 10.0))
+        trans_vars[(p['id'], 'BM_to_FCM')] = trans_BM_FCM
+        trans_vars[(p['id'], 'FCM_to_MM')] = trans_FCM_MM
+        
+        # Small penalty to prefer direct matches before downgrading
+        slack_vars.append(trans_BM_FCM * 10.0)
+        slack_vars.append(trans_FCM_MM * 10.0)
         
         dev_vars = []
         for m in milk_types:
             flow_in_m = sum(flow_h_p[(h['id'], p['id'], m)] for h in hubs if (h['id'], p['id'], m) in flow_h_p)
             
             effective_flow_in = flow_in_m
-            for sub in milk_subs:
-                key = (p['id'], f"{sub['from']}_to_{sub['to']}")
-                if key in trans_vars:
-                    if milk_group_matches(m, sub['from'], milk_config, alias_map):
-                        effective_flow_in -= trans_vars[key]
-                    if milk_group_matches(m, sub['to'], milk_config, alias_map):
-                        effective_flow_in += trans_vars[key]
+            m_lower = str(m).lower()
+            if 'buffalo' in m_lower or 'bm' in m_lower:
+                effective_flow_in = flow_in_m - trans_BM_FCM
+            elif 'fcm' in m_lower:
+                effective_flow_in = flow_in_m + trans_BM_FCM - trans_FCM_MM
+            elif 'mm' in m_lower:
+                effective_flow_in = flow_in_m + trans_FCM_MM
             
             # Bound required flow into plant to its required supply limit (R_{p,m})
             r_limit = 0.0
@@ -1574,95 +680,6 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                 solver.Add(sum(inflow_vars) + plant_slack >= 0.20 * total_capacity)
                 slack_vars.append(plant_slack * 1000.0)
 
-    # 3. Supplier -> Plant consumption quotas (from SupplierPlantConsumption sheet)
-    supplier_plant_rules = parse_supplier_plant_consumption(excel_file_path)
-    if supplier_plant_rules and bmc_to_supplier:
-        def milk_matches(m_str, target_milk):
-            return milk_group_matches(m_str, target_milk, milk_config, alias_map)
-
-        # Group rules by (plant_id, milk_type_key) to track total allocated demand and prevent other suppliers from fulfilling it
-        plant_milk_allocations = {}
-
-        for idx, rule in enumerate(supplier_plant_rules):
-            rule_supplier = rule['supplier'].strip().lower()
-            rule_plant = rule['plant'].strip().lower()
-            rule_milk = rule.get('milk_type', '').strip().lower()
-            rule_type = rule['type']
-            rule_value = rule['value']
-
-            matched_plants = [
-                p for p in plants 
-                if str(p['id']).strip().lower() == rule_plant or str(p.get('name', '')).strip().lower() == rule_plant
-            ]
-
-            matched_hubs = [
-                h for h in hubs
-                if str(bmc_to_supplier.get(str(h['id']).strip(), bmc_to_supplier.get(h['id'], ''))).strip().lower() == rule_supplier
-            ]
-
-            if not matched_plants or not matched_hubs:
-                continue
-
-            for target_p in matched_plants:
-                p_id = target_p['id']
-                
-                # Calculate relevant plant demand for the specified milk type(s)
-                p_demands = target_p.get('demands', [])
-                if p_demands:
-                    p_demand = sum(d.get('demand', 0.0) for d in p_demands if 'type' in d and milk_matches(d['type'], rule_milk))
-                else:
-                    inflow_milks = target_p.get('inflow_milks', [])
-                    if inflow_milks:
-                        p_demand = sum(im.get('capacity', 0.0) for im in inflow_milks if 'type' in im and milk_matches(im['type'], rule_milk))
-                    elif not rule_milk:
-                        p_demand = target_p.get('capacity', 0.0)
-                    else:
-                        p_demand = target_p.get('capacity', 0.0) / max(1, len(milk_types))
-
-                if rule_type == 'Percentage':
-                    target_qty = (rule_value / 100.0) * p_demand
-                else:
-                    target_qty = rule_value
-
-                if target_qty <= 0:
-                    continue
-
-                # Track allocation for this plant & commodity
-                group_key = (p_id, rule_milk)
-                if group_key not in plant_milk_allocations:
-                    plant_milk_allocations[group_key] = {'p_demand': p_demand, 'allocated': 0.0, 'specified_suppliers': set()}
-                plant_milk_allocations[group_key]['allocated'] += target_qty
-                plant_milk_allocations[group_key]['specified_suppliers'].add(rule_supplier)
-
-                relevant_flow_vars = [
-                    flow_h_p[(h['id'], p_id, m)]
-                    for h in matched_hubs
-                    for m in milk_types
-                    if (h['id'], p_id, m) in flow_h_p and milk_matches(m, rule_milk)
-                ]
-
-                if relevant_flow_vars:
-                    # STRICT UPPER BOUND & EXACT TARGET: No overage is allowed.
-                    # Supplier must supply exactly target_qty (shortfall heavily penalized if physically impossible)
-                    shortfall_var = solver.NumVar(0, solver.infinity(), f"sp_shortfall_{p_id}_{idx}")
-                    solver.Add(sum(relevant_flow_vars) + shortfall_var == target_qty)
-                    slack_vars.append(shortfall_var * 500000.0)
-
-        # Apply exclusion constraint: Other suppliers cannot dispatch milk for the allocated demand
-        for (p_id, rule_milk), alloc_info in plant_milk_allocations.items():
-            unallocated_cap = max(0.0, alloc_info['p_demand'] - alloc_info['allocated'])
-            specified_suppliers = alloc_info['specified_suppliers']
-            other_flow_vars = [
-                flow_h_p[(h['id'], p_id, m)]
-                for h in hubs
-                if str(bmc_to_supplier.get(str(h['id']).strip(), bmc_to_supplier.get(h['id'], ''))).strip().lower() not in specified_suppliers
-                for m in milk_types
-                if (h['id'], p_id, m) in flow_h_p and milk_matches(m, rule_milk)
-            ]
-            if other_flow_vars:
-                solver.Add(sum(other_flow_vars) <= unallocated_cap)
-
-
 
     # Objective: Maximize Profit
     # Profit = Revenue - Transport Cost - Processing/Handling Cost
@@ -1692,11 +709,15 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
         effective_dist = dist
         cost_per_unit = effective_dist * transport_cost_per_km
         
-        # Commodity Priority Logic from MilkConfig
-        m_canonical = alias_map.get(str(m).strip().lower(), str(m).strip()) if alias_map else str(m).strip()
-        m_info = milk_config.get(m_canonical, {})
-        bonus_factor = m_info.get('transport_bonus_factor', 0.0)
-        bonus = transport_cost_per_km * bonus_factor
+        # Commodity Priority Logic: BM > FCM > MM
+        m_lower = str(m).lower()
+        bonus = 0.0
+        if 'buffalo' in m_lower or 'bm' in m_lower:
+            bonus = transport_cost_per_km * 0.6  # Equivalent to 0.003 when cost is 0.005
+        elif 'fcm' in m_lower:
+            bonus = transport_cost_per_km * 0.4  # Equivalent to 0.002 when cost is 0.005
+        elif 'mm' in m_lower:
+            bonus = transport_cost_per_km * 0.2  # Equivalent to 0.001 when cost is 0.005
             
         cost_per_unit -= bonus
             
@@ -1722,7 +743,10 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             if p_demands:
                 inflow_milks = [{'type': d['type'], 'capacity': d['demand'], 'processing_cost': d.get('processing_cost', 0.40)} for d in p_demands]
             else:
-                inflow_milks = get_default_inflow_milks(p.get('capacity', 10000), p.get('processing_cost', 0.50), milk_types=milk_types, milk_config=milk_config)
+                inflow_milks = [
+                    {'type': 'Cow Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)},
+                    {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)}
+                ]
         cost_dict = {m['type']: m.get('processing_cost', 0.0) for m in inflow_milks if 'type' in m}
         dev_vars = []
         for m in milk_types:
@@ -1777,8 +801,11 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                     demand_dict = {d['type']: d.get('demand', 0) for d in p_demands if 'type' in d}
                     if m in demand_dict:
                         cap = demand_dict[m]
-                    else:
-                        demand_keys = [k for k in demand_dict.keys() if milk_group_matches(k, m, milk_config, alias_map)]
+                    elif 'cow' in m_lower or 'cm' in m_lower:
+                        demand_keys = [k for k in demand_dict.keys() if 'cow' in k.lower() or 'cm' in k.lower()]
+                        if demand_keys: cap = sum(demand_dict[k] for k in demand_keys)
+                    elif 'buffalo' in m_lower or 'bm' in m_lower:
+                        demand_keys = [k for k in demand_dict.keys() if 'buffalo' in k.lower() or 'bm' in k.lower()]
                         if demand_keys: cap = sum(demand_dict[k] for k in demand_keys)
                 else:
                     inflow_milks = p.get('inflow_milks', [])
@@ -1811,86 +838,29 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
             status = solver.Solve()
 
     if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
-        # Build the set of BMC IDs whose supplier has SupplyOutSide = Yes
-        allowed_outside_bmcs = set()
-        for bmc_id, supplier_name in bmc_to_supplier.items():
-            supplier_data = vehicle_limits_map.get(supplier_name, {})
-            if isinstance(supplier_data, dict) and supplier_data.get('supply_outside', False):
-                allowed_outside_bmcs.add(str(bmc_id).strip())
-
-        # Identify plant commodities protected by SupplierPlantConsumption quotas so post-processing doesn't violate them
-        protected_plant_milks = set()
-        if 'supplier_plant_rules' in locals() and supplier_plant_rules:
-            for rule in supplier_plant_rules:
-                r_plant = rule['plant'].strip().lower()
-                r_milk = rule.get('milk_type', '').strip().lower()
-                for p in plants:
-                    if str(p['id']).strip().lower() == r_plant or str(p.get('name', '')).strip().lower() == r_plant:
-                        for m in milk_types:
-                            if 'milk_matches' in locals() and milk_matches(m, r_milk):
-                                protected_plant_milks.add((p['id'], m))
-
-        # Post-processing: Pure Python reallocation from over-supplied plants/BMCs to zero-supply plants
-        out_of_mapping_keys = reallocate_surplus_flows(flow_h_p, plants, hubs, milk_types, get_pair_dist, MAX_DISTANCE_LIMIT, allowed_outside_bmcs=allowed_outside_bmcs, protected_plant_milks=protected_plant_milks)
-
-        # Consolidate small splits below MinQuantity threshold (skip out-of-mapping reallocated flows and quota protected commodities)
-        consolidate_small_dispatch_splits(flow_h_p, hubs, plants, milk_types, get_pair_dist, excel_file_path, bmc_to_supplier=bmc_to_supplier, skip_keys=out_of_mapping_keys, protected_plant_milks=protected_plant_milks)
-
         routes = []
 
-        # Pre-calculate actual dynamic substitutions per plant
+        # Pre-calculate actual substitutions per plant
         plant_subs = {}
         for p in plants:
             pid = p['id']
-            # Calculate physical inflows per milk type and per group
-            group_inflows = {}
-            for _h in hubs:
-                for _m in milk_types:
-                    if (_h['id'], pid, _m) in flow_h_p:
-                        _fval = flow_h_p[(_h['id'], pid, _m)].solution_value()
-                        if _fval > 0:
-                            matched_keys = set()
-                            for _sub in milk_subs:
-                                _from_m = _sub['from']
-                                if milk_group_matches(_m, _from_m, milk_config, alias_map):
-                                    matched_keys.add(_from_m)
-                            matched_keys.add(_m)
-                            for _k_inflow in matched_keys:
-                                group_inflows[_k_inflow] = group_inflows.get(_k_inflow, 0.0) + _fval
-
-            # Collect raw translation solver values
-            raw_trans = {}
-            for _sub in milk_subs:
-                _k = (pid, f"{_sub['from']}_to_{_sub['to']}")
-                raw_trans[f"{_sub['from']}_to_{_sub['to']}"] = trans_vars[_k].solution_value() if 'trans_vars' in locals() and _k in trans_vars else 0.0
-
-            # Resolve actual substitutions, handling 2-step cascading (e.g. BM -> FCM -> MM)
-            actual_trans = {}
-            for _sub in milk_subs:
-                _k_str = f"{_sub['from']}_to_{_sub['to']}"
-                actual_trans[_k_str] = raw_trans[_k_str]
-
-            # Check for any cascades (sub1.to == sub2.from) and adjust actual values
-            for _sub1 in milk_subs:
-                for _sub2 in milk_subs:
-                    if _sub1['to'] == _sub2['from']:
-                        _from_a, _mid_b, _to_c = _sub1['from'], _sub1['to'], _sub2['to']
-                        _val_a_b = raw_trans[f"{_from_a}_to_{_mid_b}"]
-                        _val_b_c = raw_trans[f"{_mid_b}_to_{_to_c}"]
-                        _phys_b = group_inflows.get(_mid_b, 0.0)
-                        
-                        if _val_b_c > 0:
-                            _b_cascaded_c = min(_val_b_c, _phys_b)
-                            _a_cascaded_c = max(0.0, _val_b_c - _phys_b)
-                            _a_cascaded_b = max(0.0, _val_a_b - _a_cascaded_c)
-                            
-                            actual_trans[f"{_from_a}_to_{_mid_b}"] = _a_cascaded_b
-                            actual_trans[f"{_mid_b}_to_{_to_c}"] = _b_cascaded_c
-                            actual_trans[f"{_from_a}_to_{_to_c}"] = _a_cascaded_c
-
+            bm_to_fcm = trans_vars[(pid, 'BM_to_FCM')].solution_value() if 'trans_vars' in locals() and (pid, 'BM_to_FCM') in trans_vars else 0.0
+            fcm_to_mm = trans_vars[(pid, 'FCM_to_MM')].solution_value() if 'trans_vars' in locals() and (pid, 'FCM_to_MM') in trans_vars else 0.0
+            
+            # calculate inflows
+            bm_inflow = sum(flow_h_p[(h['id'], pid, _m)].solution_value() for h in hubs for _m in milk_types if (h['id'], pid, _m) in flow_h_p and ('buffalo' in str(_m).lower() or 'bm' in str(_m).lower()))
+            fcm_inflow = sum(flow_h_p[(h['id'], pid, _m)].solution_value() for h in hubs for _m in milk_types if (h['id'], pid, _m) in flow_h_p and 'fcm' in str(_m).lower())
+            
+            fcm_cascaded = min(fcm_to_mm, fcm_inflow) if fcm_inflow > 0 else 0.0
+            bm_cascaded_to_mm = max(0, fcm_to_mm - fcm_inflow)
+            bm_cascaded_to_fcm = max(0, bm_to_fcm - bm_cascaded_to_mm)
+            
             plant_subs[pid] = {
-                'inflows': group_inflows,
-                'actual_trans': actual_trans
+                'BM_inflow': bm_inflow,
+                'FCM_inflow': fcm_inflow,
+                'BM_to_FCM_actual': bm_cascaded_to_fcm,
+                'BM_to_MM_actual': bm_cascaded_to_mm,
+                'FCM_to_MM_actual': fcm_cascaded
             }
 
         # Extract Hub -> Plant flows
@@ -1925,25 +895,35 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                 
                 primary_flow = float(val)
                 extra_flows = []
-                subs_info = plant_subs.get(p_id, {})
-                group_inflows = subs_info.get('inflows', {})
-                actual_trans = subs_info.get('actual_trans', {})
+                subs = plant_subs.get(p_id, {})
+                m_lower = str(m).lower()
                 
-                # Check all recorded actual translations originating from this milk type m
-                for trans_key, trans_val in actual_trans.items():
-                    if trans_val > 0 and "_to_" in trans_key:
-                        parts = trans_key.split("_to_")
-                        from_m, to_m = parts[0], parts[1]
-                        if milk_group_matches(m, from_m, milk_config, alias_map):
-                            inflow_from = group_inflows.get(from_m, 0.0)
-                            if inflow_from > 0:
-                                prop = val / inflow_from
-                                r_conv = prop * trans_val
-                                if plant_bmc_mapping and (str(p_id), str(h_id), str(to_m)) not in plant_bmc_mapping:
-                                    r_conv = 0.0
-                                primary_flow -= r_conv
-                                if round(r_conv, 2) > 0:
-                                    extra_flows.append((r_conv, f"{from_m} to {to_m}", to_m))
+                if ('buffalo' in m_lower or 'bm' in m_lower) and subs.get('BM_inflow', 0) > 0:
+                    prop = val / subs['BM_inflow']
+                    r_bm_to_fcm = prop * subs['BM_to_FCM_actual']
+                    r_bm_to_mm = prop * subs['BM_to_MM_actual']
+                    
+                    if plant_bmc_mapping and (str(p_id), str(h_id), "FCM") not in plant_bmc_mapping:
+                        r_bm_to_fcm = 0.0
+                    if plant_bmc_mapping and (str(p_id), str(h_id), "MM") not in plant_bmc_mapping:
+                        r_bm_to_mm = 0.0
+                        
+                    primary_flow -= (r_bm_to_fcm + r_bm_to_mm)
+                    if round(r_bm_to_fcm, 2) > 0:
+                        extra_flows.append((r_bm_to_fcm, "BM to FCM", "FCM"))
+                    if round(r_bm_to_mm, 2) > 0:
+                        extra_flows.append((r_bm_to_mm, "BM to MM", "MM"))
+                        
+                elif 'fcm' in m_lower and subs.get('FCM_inflow', 0) > 0:
+                    prop = val / subs['FCM_inflow']
+                    r_fcm_to_mm = prop * subs['FCM_to_MM_actual']
+                    
+                    if plant_bmc_mapping and (str(p_id), str(h_id), "MM") not in plant_bmc_mapping:
+                        r_fcm_to_mm = 0.0
+                        
+                    primary_flow -= r_fcm_to_mm
+                    if round(r_fcm_to_mm, 2) > 0:
+                        extra_flows.append((r_fcm_to_mm, "FCM to MM", "MM"))
 
                 if round(primary_flow, 2) > 0 or not extra_flows:
                     route_dict = {
@@ -1964,10 +944,6 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                     }
                     for v_type, trips in optimal_veh.items():
                         route_dict[f'vehicles_{v_type}'] = trips
-                    if out_of_mapping_keys and (h_id, p_id, m) in out_of_mapping_keys:
-                        route_dict['out_of_mapping'] = True
-                    else:
-                        route_dict['out_of_mapping'] = False
                     routes.append(route_dict)
                     
                 for ext_flow, ext_ptype, target_group in extra_flows:
@@ -2027,7 +1003,10 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
                 if p_demands:
                     inflow_milks = [{'type': d['type'], 'capacity': d['demand'], 'processing_cost': d.get('processing_cost', 0.40)} for d in p_demands]
                 else:
-                    inflow_milks = get_default_inflow_milks(p.get('capacity', 10000), p.get('processing_cost', 0.50), milk_types=milk_types, milk_config=milk_config)
+                    inflow_milks = [
+                        {'type': 'Cow Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)},
+                        {'type': 'Buffalo Milk', 'capacity': p.get('capacity', 10000), 'processing_cost': p.get('processing_cost', 0.50)}
+                    ]
             cost_dict = {m['type']: m.get('processing_cost', 0.0) for m in inflow_milks if 'type' in m}
             dev_vars = []
         for m in milk_types:
@@ -2076,7 +1055,19 @@ def solve_network_lp(hubs, plants, transport_cost_per_km=0.005, excel_file_path=
 
 # Background thread processor for jobs
 def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, excel_file_path=None):
-    update_job_status(job_id, 'PROCESSING')
+    global MAX_DISTANCE_LIMIT
+    MAX_DISTANCE_LIMIT = 800.0  # Reset to default for each job to prevent mixing data between jobs
+    try:
+        from src.config.environment import Environment
+        import pymongo
+        client = pymongo.MongoClient(Environment.MONGO_URI)
+        setting = client[Environment.MONGO_DB]["RequestSettings"].find_one({"requestId": job_id})
+        if setting and "maxDistance" in setting:
+            MAX_DISTANCE_LIMIT = float(setting["maxDistance"])
+        client.close()
+    except Exception as e:
+        print(f"Error fetching MAX_DISTANCE for job {job_id}: {e}")
+
     start_time = time.time()
     
     try:
@@ -2421,7 +1412,41 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
 
             df_nodes = pd.DataFrame(nodes_data)
             
-            # (Legacy unused plant_subs calculation removed for clean dynamic architecture)
+            # Calculate plant-level substitution values from the solver
+            plant_subs = {}
+            for nd in nodes_data:
+                if nd['Type'] == 'plant':
+                    pid = nd['Node ID']
+                    if pid not in plant_subs:
+                        plant_subs[pid] = {
+                            'BM_to_FCM': res.get('trans_vars_solution', {}).get((pid, 'BM_to_FCM'), 0.0),
+                            'FCM_to_MM': res.get('trans_vars_solution', {}).get((pid, 'FCM_to_MM'), 0.0),
+                            'BM_inflow': 0.0,
+                            'FCM_inflow': 0.0
+                        }
+                    
+                    comm = str(nd['Commodity']).lower()
+                    inflow = nd['Inflow Throughput']
+                    if 'buffalo' in comm or 'bm' in comm:
+                        plant_subs[pid]['BM_inflow'] += inflow
+                    elif 'fcm' in comm:
+                        plant_subs[pid]['FCM_inflow'] += inflow
+            
+            # Since BM_to_FCM might cascade further to MM, we calculate how much BM went to MM
+            # The amount of BM that goes to MM is any FCM_to_MM that exceeds physical FCM inflow.
+            # But the plant pools them.
+            for pid, subs in plant_subs.items():
+                bm_to_fcm = subs['BM_to_FCM']
+                fcm_to_mm = subs['FCM_to_MM']
+                physical_fcm = subs['FCM_inflow']
+                
+                fcm_cascaded = min(fcm_to_mm, physical_fcm)
+                bm_cascaded_to_mm = max(0, fcm_to_mm - physical_fcm)
+                bm_cascaded_to_fcm = max(0, bm_to_fcm - bm_cascaded_to_mm)
+                
+                subs['BM_to_FCM_actual'] = bm_cascaded_to_fcm
+                subs['BM_to_MM_actual'] = bm_cascaded_to_mm
+                subs['FCM_to_MM_actual'] = fcm_cascaded
             
             # 3. Routes Sheet (Active and Unused/Candidate Routes)
             routes_data = []
@@ -2958,7 +1983,7 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 df_plant_wise_dispatch = df_plant_wise_dispatch.reindex(columns=cols)
                 
                 # Update quantities for converted milk
-                mask = df_plant_wise_dispatch['Product'].astype(str).str.contains(' to ', na=False)
+                mask = df_plant_wise_dispatch['Product'].astype(str).str.contains('to FCM|to MM', na=False)
                 converted_rows = df_plant_wise_dispatch[mask]
                 
                 for _, row in converted_rows.iterrows():
@@ -3230,16 +2255,18 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 
                 priorities = []
                 allowed_comms = []
-                if " to " in m_type_lower:
-                    parts = [p.strip() for p in m_type.split(" to ") if p.strip()]
-                    if len(parts) == 2:
-                        from_m, to_m = parts[0], parts[1]
-                        priorities.append((p_id, to_m))
-                        priorities.append((p_id, from_m))
-                        allowed_comms = [to_m.upper(), from_m.upper()]
-                    else:
-                        priorities.append((p_id, m_type))
-                        allowed_comms = [m_type.upper()]
+                if m_type_lower == "bm to fcm":
+                    priorities.append((p_id, "FCM"))
+                    priorities.append((p_id, "BM"))
+                    allowed_comms = ["FCM", "BM"]
+                elif m_type_lower == "bm to mm":
+                    priorities.append((p_id, "MM"))
+                    priorities.append((p_id, "BM"))
+                    allowed_comms = ["MM", "BM"]
+                elif m_type_lower == "fcm to mm":
+                    priorities.append((p_id, "MM"))
+                    priorities.append((p_id, "FCM"))
+                    allowed_comms = ["MM", "FCM"]
                 else:
                     priorities.append((p_id, m_type))
                     allowed_comms = [m_type.upper()]
@@ -3847,295 +2874,19 @@ def process_job_in_background(job_id, network_id, nodes, transport_cost_per_km, 
                 except Exception as e:
                     print("Error highlighting routes:", str(e))
                 
-            update_job_completed(job_id, output_filename, res['summary'])
-        else:
-            update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")
+            #update_job_completed(job_id, output_filename, res['summary'])
+        #else:
+            #update_job_failed(job_id, f"Solver solved to infeasible status: {res.get('status')}")
             
     except Exception as e:
         import traceback
         error_msg = f"Exception: {str(e)}\n{traceback.format_exc()}"
         print("Job processing failed:", error_msg)
-        update_job_failed(job_id, error_msg[:1000])
+        #update_job_failed(job_id, error_msg[:1000])
 
 
-@app.route('/api/optimize', methods=['POST'])
-def optimize_network():
-    data = request.json
-    if not data:
-        return jsonify({'status': 'ERROR', 'message': 'No data provided'}), 400
-
-    farmers = data.get('farmers', [])
-    hubs = data.get('hubs', [])
-    plants = data.get('plants', [])
-    transport_cost_per_km = data.get('transport_cost_per_km', 0.005)
-
-    res = solve_network_lp(hubs, plants, transport_cost_per_km)
-    if res.get('status') == 'ERROR':
-        return jsonify(res), 500
-    return jsonify(res)
 
 
-@app.route('/api/jobs/generate_template', methods=['GET'])
-def download_template():
-    try:
-        df = generate_random_network()
-        temp_filename = f"template_{uuid.uuid4().hex[:8]}.xlsx"
-        temp_path = os.path.join(UPLOAD_FOLDER, temp_filename)
-        
-        # Save nodes in DB under network_id
-        network_id = df.iloc[0]['network_id']
-        nodes_list = parse_excel_nodes(df)
-        
-        if db_available:
-            try:
-                nodes_collection.delete_many({'network_id': network_id})
-                nodes_collection.insert_many(nodes_list)
-            except Exception as e:
-                print("Error saving template nodes to Mongo:", e)
-        else:
-            global in_memory_nodes
-            in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id') != network_id]
-            in_memory_nodes.extend(nodes_list)
-            
-        df.to_excel(temp_path, index=False)
-        return send_file(temp_path, as_attachment=True, download_name=f"network_template_{network_id[:8]}.xlsx")
-    except Exception as e:
-        import traceback
-        print("Template generation failed:", traceback.format_exc())
-        return jsonify({'status': 'ERROR', 'message': f'Failed to generate template: {str(e)}'}), 500
 
 
-@app.route('/api/jobs/upload', methods=['POST'])
-def upload_job():
-    if 'file' not in request.files:
-        return jsonify({'status': 'ERROR', 'message': 'No file part in the request'}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'status': 'ERROR', 'message': 'No file selected for uploading'}), 400
-        
-    if file and file.filename.endswith(('.xlsx', '.xls')):
-        filename = secure_filename(file.filename)
-        job_id = str(uuid.uuid4())
-        input_filename = f"input_{job_id}_{filename}"
-        file_path = os.path.join(UPLOAD_FOLDER, input_filename)
-        file.save(file_path)
-        
-        try:
-            nodes = parse_excel_nodes(file_path)
-            if not nodes:
-                return jsonify({'status': 'ERROR', 'message': 'No valid nodes found in the Excel sheet'}), 400
-                
-            network_id = nodes[0].get('network_id')
-            if not network_id:
-                network_id = str(uuid.uuid4())
-                for n in nodes:
-                    n['network_id'] = network_id
-            
-            if db_available:
-                try:
-                    for n in nodes:
-                        nodes_collection.replace_one({'id': n['id'], 'network_id': network_id}, n, upsert=True)
-                except Exception as e:
-                    print("Error saving uploaded nodes to Mongo:", e)
-            else:
-                global in_memory_nodes
-                in_memory_nodes = [n for n in in_memory_nodes if n.get('network_id') != network_id]
-                in_memory_nodes.extend(nodes)
-                
-            job = {
-                'job_id': job_id,
-                'network_id': network_id,
-                'status': 'PENDING',
-                'created_at': datetime.datetime.now().isoformat(),
-                'completed_at': None,
-                'error_message': None,
-                'input_filename': input_filename,
-                'output_filename': None,
-                'result_summary': None,
-                'node_count': len(nodes)
-            }
-            save_new_job(job)
-            
-            thread = threading.Thread(
-                target=process_job_in_background, 
-                args=(job_id, network_id, nodes, 0.02, file_path)
-            )
-            thread.daemon = True
-            thread.start()
-            
-            return jsonify({
-                'status': 'SUCCESS',
-                'message': 'Job uploaded successfully. Solver is running in the background.',
-                'job_id': job_id,
-                'network_id': network_id
-            }), 201
-            
-        except Exception as e:
-            import traceback
-            print("Job upload parsing failed:", traceback.format_exc())
-            return jsonify({'status': 'ERROR', 'message': f'Failed to parse Excel nodes: {str(e)}'}), 500
-            
-    return jsonify({'status': 'ERROR', 'message': 'Invalid file format. Please upload an Excel (.xlsx) file.'}), 400
 
-
-@app.route('/api/jobs', methods=['GET'])
-def get_jobs():
-    jobs = get_all_jobs()
-    serialized = []
-    for j in jobs:
-        j_copy = dict(j)
-        j_copy.pop('_id', None)
-        serialized.append(j_copy)
-    return jsonify(serialized)
-
-
-@app.route('/api/jobs/<job_id>/download', methods=['GET'])
-def download_job_results(job_id):
-    jobs = get_all_jobs()
-    job = next((j for j in jobs if j['job_id'] == job_id), None)
-    
-    if not job:
-        return jsonify({'status': 'ERROR', 'message': 'Job not found'}), 404
-        
-    if job['status'] != 'COMPLETED' or not job['output_filename']:
-        return jsonify({'status': 'ERROR', 'message': 'Job results are not ready for download'}), 400
-        
-    output_path = os.path.join(OUTPUT_FOLDER, job['output_filename'])
-    if not os.path.exists(output_path):
-        return jsonify({'status': 'ERROR', 'message': 'Result file was not found on server'}), 404
-        
-    return send_file(output_path, as_attachment=True, download_name=f"network_results_{job_id[:8]}.xlsx")
-
-
-@app.route('/api/jobs/<job_id>/details', methods=['GET'])
-def get_job_details(job_id):
-    jobs = get_all_jobs()
-    job = next((j for j in jobs if j['job_id'] == job_id), None)
-    
-    if not job:
-        return jsonify({'status': 'ERROR', 'message': 'Job not found'}), 404
-        
-    if job['status'] != 'COMPLETED' or not job['output_filename']:
-        return jsonify({'status': 'ERROR', 'message': 'Job results are not ready'}), 400
-        
-    network_id = job.get('network_id')
-    
-    # 1. Fetch nodes for this network
-    nodes_list = []
-    if db_available:
-        try:
-            db_nodes = list(nodes_collection.find({'network_id': network_id}))
-            nodes_list = [serialize_node(n) for n in db_nodes]
-        except Exception as e:
-            print("Error fetching job nodes from MongoDB:", e)
-    else:
-        nodes_list = [n for n in in_memory_nodes if n.get('network_id') == network_id]
-        
-    # If no nodes saved, return empty
-    if not nodes_list:
-        return jsonify({'status': 'ERROR', 'message': 'Nodes not found for this network'}), 404
-        
-    output_path = os.path.join(OUTPUT_FOLDER, job['output_filename'])
-    if not os.path.exists(output_path):
-        return jsonify({'status': 'ERROR', 'message': 'Result Excel file not found'}), 404
-        
-    try:
-        # 2. Parse Excel file for active routes and node metrics
-        df_routes = pd.read_excel(output_path, 'Routes')
-        df_nodes = pd.read_excel(output_path, 'Nodes')
-        
-        # Filter active routes
-        df_active = df_routes[df_routes['Status'] == 'ACTIVE']
-        
-        routes = []
-        for _, r in df_active.iterrows():
-            routes.append({
-                'id': str(r.get('Route ID', '')),
-                'from_id': str(r.get('From Node ID', '')),
-                'to_id': str(r.get('To Node ID', '')),
-                'from_type': str(r.get('From Type', '')),
-                'to_type': str(r.get('To Type', '')),
-                'flow': float(r.get('Flow', 0.0)),
-                'product_type': str(r.get('Product / Milk Type', '')),
-                'unit': str(r.get('Unit', '')),
-                'distance': float(r.get('Distance (km)', 0.0)),
-                'cost': float(r.get('Transport Cost (₹)', 0.0)),
-                'total_vehicles': int(r.get('Total Vehicles', 0)) if pd.notna(r.get('Total Vehicles')) else 0,
-                'total_vehicle_capacity': float(r.get('Total Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Total Vehicle Capacity (L)')) else 0.0,
-                'excess_vehicle_capacity': float(r.get('Excess Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Excess Vehicle Capacity (L)')) else 0.0
-            })
-            
-        node_metrics = {}
-        for _, row in df_nodes.iterrows():
-            nid = str(row['Node ID'])
-            inflow = float(row.get('Inflow Throughput', 0.0))
-            outflow = float(row.get('Outflow Throughput', 0.0))
-            if nid not in node_metrics:
-                node_metrics[nid] = {'inflow': 0.0, 'outflow': 0.0}
-            node_metrics[nid]['inflow'] += inflow
-            node_metrics[nid]['outflow'] += outflow
-            
-        # Round node metrics
-        for nid in node_metrics:
-            node_metrics[nid]['inflow'] = round(node_metrics[nid]['inflow'], 2)
-            node_metrics[nid]['outflow'] = round(node_metrics[nid]['outflow'], 2)
-            
-        # Read vehicle allocations from 'BMC Vehicle Allocation' sheet if it exists
-        vehicle_allocations = []
-        if 'BMC Vehicle Allocation' in pd.ExcelFile(output_path).sheet_names:
-            df_veh = pd.read_excel(output_path, 'BMC Vehicle Allocation')
-            for _, r in df_veh.iterrows():
-                vehicle_allocations.append({
-                    'bmc_id': str(r.get('BMC ID', '')),
-                    'bmc_name': str(r.get('BMC Name', '')),
-                    'plant_id': str(r.get('Plant ID', '')),
-                    'plant_name': str(r.get('Plant Name', '')),
-                    'product_type': str(r.get('Product / Milk Type', '')),
-                    'flow': float(r.get('Flow Quantity', 0.0)) if pd.notna(r.get('Flow Quantity')) else 0.0,
-                    'total_vehicles': int(r.get('Total Vehicles', 0)) if pd.notna(r.get('Total Vehicles')) else 0,
-                    'total_vehicle_capacity': float(r.get('Total Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Total Vehicle Capacity (L)')) else 0.0,
-                    'excess_vehicle_capacity': float(r.get('Excess Vehicle Capacity (L)', 0.0)) if pd.notna(r.get('Excess Vehicle Capacity (L)')) else 0.0,
-                    'vehicle_reason': str(r.get('VehicleReason', 'Supplied')) if pd.notna(r.get('VehicleReason')) else 'Supplied',
-                    'cluster': str(r.get('SupplierCluster', '')) if pd.notna(r.get('SupplierCluster')) else '',
-                    'subcluster': str(r.get('SupplierSubCluster', '')) if pd.notna(r.get('SupplierSubCluster')) else '',
-                    'leave_quantity': float(r.get('LeaveQuantity', 0.0)) if pd.notna(r.get('LeaveQuantity')) else 0.0
-                })
-
-        # Parse subcluster vehicle pools from the input spreadsheet
-        vehicle_pools = {}
-        input_path = os.path.join(UPLOAD_FOLDER, job['input_filename'])
-        if os.path.exists(input_path):
-            vehicle_limits_map = parse_bmc_vehicles(input_path)
-            for bmc_id, info in vehicle_limits_map.items():
-                if isinstance(info, dict) and 'limits' in info:
-                    c = info.get('cluster', '')
-                    sc = info.get('subcluster', '')
-                    key = f"{c}||{sc}"
-                    if key not in vehicle_pools:
-                        vehicle_pools[key] = {
-                        }
-                    limits = info['limits']
-
-        return jsonify({
-            'status': 'SUCCESS',
-            'job_id': job_id,
-            'network_id': network_id,
-            'nodes': nodes_list,
-            'routes': routes,
-            'node_metrics': node_metrics,
-            'summary': job.get('result_summary', {}),
-            'vehicle_allocations': vehicle_allocations,
-            'vehicle_pools': vehicle_pools
-        })
-    except Exception as e:
-        import traceback
-        print("Error parsing Excel for details:", traceback.format_exc())
-        return jsonify({'status': 'ERROR', 'message': f'Failed to parse Excel results: {str(e)}'}), 500
-
-
-# if __name__ == '__main__':
-#     # Running on port 5001 so it doesn't conflict with any running instance of the original app
-#     port = int(os.environ.get('PORT', 5001))
-#     print(f"Starting SupplierNetworkMap on port {port}...")
-#     app.run(debug=True, use_reloader=False, port=port)

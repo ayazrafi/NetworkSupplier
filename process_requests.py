@@ -83,7 +83,24 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         df_map = pd.read_excel(input_xls, 'Plant_BMC_Mapping')
         df_input_nodes = pd.read_excel(input_xls, 'Nodes') if 'Nodes' in input_sheet_names else pd.DataFrame()
         df_input_veh = pd.read_excel(input_xls, 'Vehicle Supplier Allocation') if 'Vehicle Supplier Allocation' in input_sheet_names else pd.DataFrame()
+        df_milk_config = pd.read_excel(input_xls, 'MilkConfig') if 'MilkConfig' in input_sheet_names else pd.DataFrame()
+        df_milk_sub = pd.read_excel(input_xls, 'MilkSubstitution') if 'MilkSubstitution' in input_sheet_names else pd.DataFrame()
         input_xls.close()
+
+        # Dynamically determine available milk types from MilkConfig and Nodes sheets
+        dynamic_milk_types = []
+        if not df_milk_config.empty and 'MilkType' in df_milk_config.columns:
+            for m in df_milk_config['MilkType'].dropna().unique():
+                m_str = str(m).strip().upper()
+                if m_str and m_str not in dynamic_milk_types:
+                    dynamic_milk_types.append(m_str)
+        if not df_input_nodes.empty and 'commodity' in df_input_nodes.columns:
+            for m in df_input_nodes['commodity'].dropna().unique():
+                m_str = str(m).strip().upper()
+                if m_str and m_str != 'NAN' and m_str not in dynamic_milk_types:
+                    dynamic_milk_types.append(m_str)
+        if not dynamic_milk_types:
+            dynamic_milk_types = ['FCM', 'MM', 'BM', 'CM']
         
         bmc_supp_map = dict(zip(df_map['BMCCode'].astype(str), df_map['Supplier']))
         bmc_supp_code_map = dict(zip(df_map['BMCCode'].astype(str), df_map['SupplierCode']))
@@ -192,34 +209,39 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 supp_name = api_dict.get(str(supp_code), group['SupplierName'].iloc[0] if not group.empty and 'SupplierName' in group else '')
                 supp_data = {
                     "suppliercode": supp_code,
-                    "suppliername": supp_name,
-                    "FCM": 0.0, "MM": 0.0, "BM": 0.0, "CM": 0.0,
-                    "BMC": []
+                    "suppliername": supp_name
                 }
+                for mt in dynamic_milk_types:
+                    supp_data[mt] = 0.0
+                supp_data["BMC"] = []
                 
                 for _, r in group.iterrows():
                     b_code_full = str(r.get('BMCCode', ''))
                     b_code = b_code_full.split('_')[-1] if '_' in b_code_full else b_code_full
-                    prod = str(r.get('commodity', '')).upper()
+                    prod = str(r.get('commodity', '')).strip().upper()
                     cap = float(safe_val(r.get('capacity', 0)))
                     
-                    fcm = cap if prod == 'FCM' else 0.0
-                    mm = cap if prod == 'MM' else 0.0
-                    bm = cap if prod == 'BM' else 0.0
-                    cm = cap if prod == 'CM' else 0.0
-                    
-                    supp_data['FCM'] += fcm
-                    supp_data['MM'] += mm
-                    supp_data['BM'] += bm
-                    supp_data['CM'] += cm
-                    
-                    supp_data['BMC'].append({
+                    bmc_entry = {
                         "BMCCode": b_code,
-                        "BMCName": api_dict.get(b_code, str(r.get('name', ''))),
-                        "FCM": fcm, "MM": mm, "BM": bm, "CM": cm,
-                        "TotalSupply": fcm + mm + bm + cm
-                    })
-                supp_data['Total Supply'] = supp_data['FCM'] + supp_data['MM'] + supp_data['BM'] + supp_data['CM']
+                        "BMCName": api_dict.get(b_code, str(r.get('name', '')))
+                    }
+                    bmc_total = 0.0
+                    for mt in dynamic_milk_types:
+                        val = cap if prod == mt else 0.0
+                        bmc_entry[mt] = val
+                        supp_data[mt] = supp_data.get(mt, 0.0) + val
+                        bmc_total += val
+                    if prod and prod not in dynamic_milk_types:
+                        bmc_entry[prod] = cap
+                        supp_data[prod] = supp_data.get(prod, 0.0) + cap
+                        bmc_total += cap
+                    bmc_entry["TotalSupply"] = bmc_total
+                    supp_data['BMC'].append(bmc_entry)
+                    
+                supp_data['Total Supply'] = sum(
+                    supp_data.get(k, 0.0) for k in supp_data 
+                    if k not in ['suppliercode', 'suppliername', 'BMC', 'Total Supply']
+                )
                 format_2.append(supp_data)
         result_doc['supplierProductSupply'] = format_2
         
@@ -236,12 +258,24 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 format_3.append(veh_data)
         result_doc['supplierVehicles'] = format_3
         
+        # Dynamically create substitution mapping from MilkSubstitution sheet
+        sub_map = {}
+        if not df_milk_sub.empty:
+            from_col = next((c for c in df_milk_sub.columns if 'from' in str(c).lower()), 'FromMilk')
+            to_col = next((c for c in df_milk_sub.columns if 'to' in str(c).lower()), 'ToMilk')
+            if from_col in df_milk_sub.columns and to_col in df_milk_sub.columns:
+                for _, s_row in df_milk_sub.iterrows():
+                    fm = str(s_row[from_col]).strip().upper()
+                    tm = str(s_row[to_col]).strip().upper()
+                    if fm and tm and fm != 'NAN' and tm != 'NAN':
+                        sub_map[f"{fm} TO {tm}"] = tm
+        
         def map_product(prod):
             prod_upper = str(prod).upper().strip()
-            if prod_upper == 'BM TO FCM':
-                return 'FCM'
-            elif prod_upper == 'FCM TO MM' or prod_upper == 'BM TO MM':
-                return 'MM'
+            if prod_upper in sub_map:
+                return sub_map[prod_upper]
+            if ' TO ' in prod_upper:
+                return prod_upper.split(' TO ')[-1].strip()
             return prod
 
         # Format 4 from 'Total Supply (Max Util)'
@@ -329,11 +363,14 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 actual_bmc = str(bmc).split('_')[-1] if '_' in str(bmc) else str(bmc)
                 d6 = {
                     "Plant": plant, "PlantName": api_dict.get(str(plant), ""),
-                    "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, ""),
-                    "FCM": 0, "MM": 0, "BM": 0, "CM": 0
+                    "BMCCode": actual_bmc, "BMCName": api_dict.get(actual_bmc, "")
                 }
+                for mt in dynamic_milk_types:
+                    d6[mt] = 0.0
                 for _, r in group.iterrows():
-                    prod = str(r['Product / Milk Type']).upper()
+                    prod = str(r['Product / Milk Type']).strip().upper()
+                    if prod and prod not in d6:
+                        d6[prod] = 0.0
                     if prod in d6:
                         d6[prod] += float(r.get('Dispatch Quantity', 0.0))
                 format_6.append(d6)
@@ -436,6 +473,62 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         traceback.print_exc()
         print(f"Error parsing/saving results for {request_id}: {e}")
 
+async def save_final_reports(request_id):
+    try:
+        output_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"results_{request_id}.xlsx")
+        final_report_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"finalreports_{request_id}.xlsx")
+        target_sheets_map = [
+            ('Plant Wise Dispatch (Max Util)', 'Plant Wise Dispatch'),
+            ('BMC Wise Dispatch (Max Util)', 'BMC Wise Dispatch')
+        ]
+        
+        if not os.path.exists(output_path):
+            print(f"Results file not found at {output_path} for finalreports generation.")
+            return
+
+        res_xls = pd.ExcelFile(output_path)
+        res_sheet_names = res_xls.sheet_names
+        
+        with pd.ExcelWriter(final_report_path) as writer:
+            wrote_any_final = False
+            for src_name, dest_name in target_sheets_map:
+                if src_name in res_sheet_names:
+                    df_sheet = pd.read_excel(res_xls, src_name)
+                    df_sheet.to_excel(writer, sheet_name=dest_name, index=False)
+                    wrote_any_final = True
+                    
+            veh_s_name = next((s for s in res_sheet_names if str(s).strip().startswith('BMC Vehicle Allocation (Max')), None)
+            if veh_s_name:
+                df_veh_final = pd.read_excel(res_xls, veh_s_name)
+                if not df_veh_final.empty:
+                    # Ignore rows where Dispatch Quantity is zero
+                    disp_col = next((c for c in df_veh_final.columns if str(c).strip().lower() == 'dispatch quantity'), None)
+                    if disp_col:
+                        df_veh_final = df_veh_final[pd.to_numeric(df_veh_final[disp_col], errors='coerce').fillna(0) != 0].copy()
+                    
+                    # Remove columns from 'SupplierCluster' to 'Left Quantity' inclusive
+                    cols_list = list(df_veh_final.columns)
+                    sc_col = next((c for c in cols_list if str(c).strip().lower() == 'suppliercluster'), None)
+                    lq_col = next((c for c in cols_list if str(c).strip().lower() == 'left quantity'), None)
+                    if sc_col and lq_col and cols_list.index(sc_col) <= cols_list.index(lq_col):
+                        start_idx = cols_list.index(sc_col)
+                        end_idx = cols_list.index(lq_col)
+                        cols_to_drop = cols_list[start_idx:end_idx + 1]
+                        df_veh_final = df_veh_final.drop(columns=cols_to_drop)
+                        
+                df_veh_final.to_excel(writer, sheet_name='BMC Vehicle Allocation', index=False)
+                wrote_any_final = True
+                
+            if not wrote_any_final:
+                pd.DataFrame([{"Message": "No data"}]).to_excel(writer, sheet_name='Empty', index=False)
+                
+        res_xls.close()
+        print(f"Saved finalreports Excel at {final_report_path}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Error generating finalreports for {request_id}: {e}")
+
 async def poll_requests():
     # Environment.JOB_ID check removed so that the task can start and pause dynamically
         
@@ -493,8 +586,36 @@ async def poll_requests():
             master_data = fetch_master_data()
             master_dict = {str(d.get('code')): d for d in master_data}
             
-            distances_data = fetch_distance_data()
-            dist_dict = {str(d.get('route_code', '')).strip(): float(d.get('distance', 0)) for d in distances_data}
+            dist_dict = {}
+            
+            def norm_code(val):
+                if pd.isna(val):
+                    return ""
+                s = str(val).strip()
+                if s.endswith(".0"):
+                    s = s[:-2]
+                return s
+
+            try:
+                db = DatabaseConnection.client["Network-Planner"] if DatabaseConnection.client else DatabaseConnection.get_db()
+                dist_coll = db["BMCPlantDistance"]
+                dist_docs = await dist_coll.find({}).to_list(length=None)
+                for doc in dist_docs:
+                    b_c = norm_code(doc.get("BMC Code", ""))
+                    p_c = norm_code(doc.get("Plant Code", ""))
+                    try:
+                        d_val = float(doc.get("Distance", 0.0))
+                        if pd.isna(d_val):
+                            d_val = 0.0
+                    except (ValueError, TypeError):
+                        d_val = 0.0
+                    dist_dict[(b_c, p_c)] = d_val
+                    if "_" in b_c:
+                        raw_b_c = b_c.split("_", 1)[-1]
+                        if (raw_b_c, p_c) not in dist_dict:
+                            dist_dict[(raw_b_c, p_c)] = d_val
+            except Exception as e:
+                print(f"Error reading Distance from Network-Planner.BMCPlantDistance collection: {e}")
             
             nodes = []
             for rp in req_plants:
@@ -555,25 +676,34 @@ async def poll_requests():
                             "BMCCode": bmc_node_id, "BMC": bmc_name, "commodity": m["productCode"]
                         })
             
-            unique_suppliers = list(set(m["supplierCode"] for m in req_mmcs))
-            for s_code in unique_suppliers:
-                supplier_plants = list(set(m["plantCode"] for m in req_mappings if m["supplierCode"] == s_code))
-                supplier_bmcs = list(set(m["mmcCode"] for m in req_mmcs if m["supplierCode"] == s_code))
+            all_plant_codes = list(set(
+                [str(rp["plantCode"]).strip() for rp in req_plants if "plantCode" in rp] +
+                [str(m["plantCode"]).strip() for m in req_mappings if "plantCode" in m]
+            ))
+            unique_bmcs = {}
+            for rm in req_mmcs:
+                if "mmcCode" in rm:
+                    b_code = str(rm["mmcCode"]).strip()
+                    s_code = str(rm.get("supplierCode", "")).strip()
+                    if (s_code, b_code) not in unique_bmcs:
+                        unique_bmcs[(s_code, b_code)] = rm
+                        
+            for (s_code, b_code_str), _ in unique_bmcs.items():
                 supp_name = master_dict.get(s_code, {}).get('name', s_code)
+                bmc_node_id = f"{s_code}_{b_code_str}" if s_code else b_code_str
                 
-                for b_code in supplier_bmcs:
-                    for p_code in supplier_plants:
-                        b_code_str = str(b_code).strip()
-                        p_code_str = str(p_code).strip()
-                        route = f"{b_code_str}-{p_code_str}"
-                        dist = math.ceil(dist_dict.get(route, 0.0))
-                        
-                        bmc_node_id = f"{s_code}_{b_code_str}" if s_code else b_code_str
-                        
-                        dist_list.append({
-                            "BMC Code": bmc_node_id, "Plant Code": p_code_str, "Distance": dist,
-                            "Supplier": supp_name, "Supplier Code": str(s_code), "Remark": ""
-                        })
+                for p_code_str in all_plant_codes:
+                    bmc_id_norm = norm_code(bmc_node_id)
+                    b_code_norm = norm_code(b_code_str)
+                    p_code_norm = norm_code(p_code_str)
+                    
+                    dist_val = dist_dict.get((bmc_id_norm, p_code_norm), dist_dict.get((b_code_norm, p_code_norm), 0.0))
+                    dist = math.ceil(dist_val)
+                    
+                    dist_list.append({
+                        "BMC Code": bmc_node_id, "Plant Code": p_code_str, "Distance": dist,
+                        "Supplier": supp_name, "Supplier Code": str(s_code), "Remark": ""
+                    })
                         
             df_mapping = pd.DataFrame(mapping_list).drop_duplicates() if mapping_list else pd.DataFrame(columns=["PlantCode", "Plant", "Supplier", "SupplierCode", "BMCCode", "BMC", "commodity"])
             df_distance = pd.DataFrame(dist_list).drop_duplicates() if dist_list else pd.DataFrame(columns=["BMC Code", "Plant Code", "Distance", "Supplier", "Supplier Code", "Remark"])
@@ -598,12 +728,22 @@ async def poll_requests():
                 print(f"Request {request_id} failed: zero distance found in distance mapping.")
                 continue
             
+            lenient_map = {}
+            for c in req_constraints:
+                sc = str(c.get("supplierCode", "")).strip()
+                is_lenient = c.get("isLenient")
+                if is_lenient is True or str(is_lenient).strip().lower() in ("true", "yes", "1"):
+                    lenient_map[sc] = "yes"
+                else:
+                    lenient_map[sc] = "no"
+            
             v_alloc_data = []
             supplier_codes = list(set([m["supplierCode"] for m in req_mmcs]))
             for s_code in supplier_codes:
+                supply_outside_val = lenient_map.get(str(s_code).strip(), "no")
                 row = {
                     "SupplierCluster": s_code, "SupplierSubCluster": "SubCluster_01_A", "Strategy": "Least Vehicle Strategy",
-                    "FlowLowMarginPercentage": 0, "FlowHighMarginPercentage": 0,
+                    "FlowLowMarginPercentage": 0, "FlowHighMarginPercentage": 0, "SupplyOutSide": supply_outside_val,
                     "V07": 0, "V10": 0, "V12": 0, "V15": 0, "V20": 0, "V25": 0, "V30": 0, "V35": 0
                 }
                 has_vehicles = False
@@ -612,8 +752,8 @@ async def poll_requests():
                         has_vehicles = True
                         vt = v["vehicleType"].upper().replace(' ', '')
                         count = v.get("vehicleCount", 0)
-                        if count == 0:
-                            count = 1000
+                        # if count == 0:
+                        #     count = 1000
                         if vt in row:
                             row[vt] += count
                 
@@ -643,6 +783,132 @@ async def poll_requests():
                 vehicle_type_data.append({"Vehicle Name": n_val, "VehicleCode": v["vehicleType"], "From": f_val, "To": t_val})
             df_vehicle_type = pd.DataFrame(vehicle_type_data).drop_duplicates() if vehicle_type_data else pd.DataFrame()
             
+            # 1. MilkWiseSplit from RequestConstraints (bmcMinQuantitySupply)
+            milk_wise_split_rows = []
+            for c in req_constraints:
+                s_code = str(c.get("supplierCode", "")).strip()
+                for bmc_item in c.get("bmcMinQuantitySupply", []):
+                    milk_type = str(bmc_item.get("product", "")).strip()
+                    min_qty = bmc_item.get("value", 0.0)
+                    try:
+                        min_qty_float = float(min_qty) if min_qty is not None else 0.0
+                    except (ValueError, TypeError):
+                        min_qty_float = 0.0
+                    if s_code and milk_type:
+                        milk_wise_split_rows.append({
+                            "SupplierCluster": s_code, "MilkType": milk_type, "MinQuantity": min_qty_float
+                        })
+            df_milkwise_split = pd.DataFrame(milk_wise_split_rows) if milk_wise_split_rows else pd.DataFrame(columns=["SupplierCluster", "MilkType", "MinQuantity"])
+            
+            # 2. SupplierPlantConsumption from RequestConstraints (plantFixedDemand)
+            import re
+            def to_pascal_case(s):
+                if not s:
+                    return ""
+                return "".join(word.capitalize() for word in re.split(r'[\s_-]+', str(s).strip()) if word)
+
+            supplier_plant_consumption_rows = []
+            for c in req_constraints:
+                s_code = str(c.get("supplierCode", "")).strip()
+                for item in c.get("plantFixedDemand", []):
+                    plant_code = str(item.get("plantCode", "")).strip()
+                    milk_type = str(item.get("product", "")).strip()
+                    raw_type = str(item.get("type", "")).strip()
+                    val = item.get("value", 0.0)
+                    try:
+                        val_float = float(val) if val is not None else 0.0
+                    except (ValueError, TypeError):
+                        val_float = 0.0
+                    if s_code and plant_code:
+                        supplier_plant_consumption_rows.append({
+                            "Supplier": s_code, "Plant": plant_code, "MilkType": milk_type,
+                            "Type": to_pascal_case(raw_type), "Value": val_float
+                        })
+            df_supplier_plant_consumption = pd.DataFrame(supplier_plant_consumption_rows) if supplier_plant_consumption_rows else pd.DataFrame(columns=["Supplier", "Plant", "MilkType", "Type", "Value"])
+            
+            # 3. MilkSubstitution from RequestProductConfigurations
+            sub_candidates_start = []
+            sub_candidates_next = []
+            for pc in req_product_config:
+                can_convert = str(pc.get("canBeConvert", "")).strip()
+                if can_convert and can_convert != "-" and can_convert.lower() != "null":
+                    prod = str(pc.get("product", "")).strip()
+                    derived = str(pc.get("derivedFrom", "")).strip()
+                    item_dict = {"from": prod, "to": can_convert, "is_start": (derived in ("-", "", "null"))}
+                    if item_dict["is_start"]:
+                        sub_candidates_start.append(item_dict)
+                    else:
+                        sub_candidates_next.append(item_dict)
+
+            milk_substitution_rows = []
+            for start_item in sub_candidates_start:
+                milk_substitution_rows.append({
+                    "FromMilk": start_item["from"], "ToMilk": start_item["to"],
+                    "ConversionFactor": 1, "Priority": 1, "Penalty": 10
+                })
+                curr_to = start_item["to"]
+                while True:
+                    match = next((item for item in sub_candidates_next if item["from"] == curr_to), None)
+                    if not match:
+                        break
+                    sub_candidates_next.remove(match)
+                    milk_substitution_rows.append({
+                        "FromMilk": match["from"], "ToMilk": match["to"],
+                        "ConversionFactor": 1, "Priority": 2, "Penalty": 10
+                    })
+                    curr_to = match["to"]
+
+            for leftover in sub_candidates_next:
+                milk_substitution_rows.append({
+                    "FromMilk": leftover["from"], "ToMilk": leftover["to"],
+                    "ConversionFactor": 1, "Priority": 2, "Penalty": 10
+                })
+            df_milk_substitution = pd.DataFrame(milk_substitution_rows) if milk_substitution_rows else pd.DataFrame(columns=["FromMilk", "ToMilk", "ConversionFactor", "Priority", "Penalty"])
+            
+            # 4. MilkConfig from RequestProductConfigurations & substitution chains
+            bonus_factors_map = {}
+            default_bonuses = [0.6, 0.4, 0.2, 0.1, 0.05]
+            
+            sub_map_chains = {}
+            all_to_nodes = set()
+            for r in milk_substitution_rows:
+                fm = r["FromMilk"]
+                tm = r["ToMilk"]
+                if fm not in sub_map_chains:
+                    sub_map_chains[fm] = []
+                sub_map_chains[fm].append(tm)
+                all_to_nodes.add(tm)
+
+            chain_roots = [r["FromMilk"] for r in milk_substitution_rows if r["FromMilk"] not in all_to_nodes]
+            all_from_nodes = [r["FromMilk"] for r in milk_substitution_rows]
+            search_starts = chain_roots + all_from_nodes
+
+            visited_nodes = set()
+            for start_node in search_starts:
+                if start_node in visited_nodes:
+                    continue
+                curr = start_node
+                step = 0
+                while curr and curr not in visited_nodes:
+                    visited_nodes.add(curr)
+                    if curr not in bonus_factors_map:
+                        b_val = default_bonuses[step] if step < len(default_bonuses) else 0.0
+                        bonus_factors_map[curr] = b_val
+                    next_list = sub_map_chains.get(curr, [])
+                    curr = next_list[0] if next_list else None
+                    step += 1
+
+            milk_config_rows = []
+            for pc in req_product_config:
+                prod_val = str(pc.get("product", "")).strip()
+                if prod_val:
+                    t_bonus = bonus_factors_map.get(prod_val, 0.0)
+                    milk_config_rows.append({
+                        "MilkType": prod_val, "Priority": "", "Group": prod_val,
+                        "Aliases": prod_val, "TransportBonusFactor": t_bonus, "IsRawMilk": "Yes"
+                    })
+            df_milk_config = pd.DataFrame(milk_config_rows).drop_duplicates(subset=["MilkType"]) if milk_config_rows else pd.DataFrame(columns=["MilkType", "Priority", "Group", "Aliases", "TransportBonusFactor", "IsRawMilk"])
+            
             output_dir = "uploads"
             os.makedirs(output_dir, exist_ok=True)
             excel_path = os.path.join(output_dir, f"request_{request_id}.xlsx")
@@ -653,12 +919,17 @@ async def poll_requests():
                 df_mapping.to_excel(writer, sheet_name="Plant_BMC_Mapping", index=False)
                 df_vehicle_alloc.to_excel(writer, sheet_name="Vehicle Supplier Allocation", index=False)
                 df_vehicle_type.to_excel(writer, sheet_name="Vehicle Type", index=False)
+                df_milkwise_split.to_excel(writer, sheet_name="MilkWiseSplit", index=False)
+                df_supplier_plant_consumption.to_excel(writer, sheet_name="SupplierPlantConsumption", index=False)
+                df_milk_substitution.to_excel(writer, sheet_name="MilkSubstitution", index=False)
+                df_milk_config.to_excel(writer, sheet_name="MilkConfig", index=False)
                 
             parsed_nodes = optimizer_solver.parse_excel_nodes(excel_path)
             # Use process_job_in_background which writes the result data
             optimizer_solver.process_job_in_background(job_id=request_id, network_id=network_id, nodes=parsed_nodes, transport_cost_per_km=0.02, excel_file_path=excel_path)
             
             await process_excel_and_save(request_id, excel_path, master_dict)
+            await save_final_reports(request_id)
             
             await opt_repo.collection.update_one(
                 {"requestId": request_id},
