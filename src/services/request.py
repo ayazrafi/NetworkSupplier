@@ -203,18 +203,11 @@ class RequestService:
             "updatedOn": datetime.utcnow()
         }
         query = {"groupId": config_in.groupId, "userId": config_in.userId}
-        updated = await self.user_product_config_repository.collection.find_one_and_update(
-            query,
-            {"$set": doc},
-            upsert=True,
-            return_document=ReturnDocument.AFTER
-        )
-        if updated:
-            if "_id" in updated:
-                updated["_id"] = str(updated["_id"])
-            if "updatedOn" in updated and isinstance(updated["updatedOn"], datetime):
-                updated["updatedOn"] = updated["updatedOn"].isoformat()
-        return updated or doc
+        await self.user_product_config_repository.collection.delete_many(query)
+        created = await self.user_product_config_repository.create(doc)
+        if "updatedOn" in created and isinstance(created["updatedOn"], datetime):
+            created["updatedOn"] = created["updatedOn"].isoformat()
+        return created
 
     async def get_user_product_config(self, group_id: str, user_id: str) -> Optional[Dict[str, Any]]:
         query = {"groupId": group_id, "userId": user_id}
