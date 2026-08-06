@@ -672,7 +672,7 @@ async def poll_requests():
                         bmc_node_id = f"{supplier_code}_{b_code}" if supplier_code else b_code
                         
                         mapping_list.append({
-                            "PlantCode": p_code, "Plant": plant_name, "Supplier": supp_name, "SupplierCode": supplier_code,
+                            "PlantCode": p_code, "Plant": plant_name, "Supplier": supplier_code,
                             "BMCCode": bmc_node_id, "BMC": bmc_name, "commodity": m["productCode"]
                         })
             
