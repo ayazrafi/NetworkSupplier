@@ -31,3 +31,8 @@ class RequestConstraintsRepository(BaseRepository):
 class RequestProductConfigurationsRepository(BaseRepository):
     def __init__(self):
         super().__init__("RequestProductConfigurations")
+
+class UserProductConfigRepository(BaseRepository):
+    def __init__(self):
+        super().__init__("userProductConfig")
+

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Body, Query
 from typing import Dict, Any, Optional
 from datetime import datetime
-from src.models.request import RequestCreateInput, OptimizationRequestResponse
+from src.models.request import RequestCreateInput, OptimizationRequestResponse, UserProductConfigInput
 from src.services.request import RequestService
 
 router = APIRouter(prefix="/api/v1/request", tags=["Optimization Request"])
@@ -30,6 +30,39 @@ async def get_requests_by_date(start_date: datetime, end_date: datetime):
             "success": True,
             "message": "Requests fetched successfully",
             "data": requests
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/productConfig", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+async def save_product_config(config_in: UserProductConfigInput = Body(...)):
+    try:
+        saved_config = await request_service.save_user_product_config(config_in)
+        return {
+            "success": True,
+            "message": "User product configuration saved successfully",
+            "data": saved_config
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/productConfig", response_model=Dict[str, Any], status_code=status.HTTP_200_OK)
+async def get_product_config(
+    groupId: str = Query(..., description="Group ID"),
+    userId: str = Query(..., description="User ID")
+):
+    try:
+        config = await request_service.get_user_product_config(groupId, userId)
+        if not config:
+            return {
+                "success": True,
+                "message": "No product configuration found for the given groupId and userId",
+                "data": None
+            }
+        return {
+            "success": True,
+            "message": "User product configuration fetched successfully",
+            "data": config
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -69,3 +69,23 @@ class OptimizationRequestResponse(BaseModel):
         json_encoders = {
             datetime: lambda dt: dt.isoformat()
         }
+
+class UserProductConfigItem(BaseModel):
+    milkType: Optional[str] = None
+    code: Optional[str] = None
+    derivedFrom: Optional[str] = "-"
+    canBeConvert: Optional[str] = "-"
+    hasRange: Optional[bool] = False
+    rangeValue: Optional[float] = None
+    operator: Optional[Any] = None
+    isDerived: Optional[bool] = False
+    base: Optional[str] = "-"
+
+    class Config:
+        extra = "allow"
+
+class UserProductConfigInput(BaseModel):
+    groupId: str
+    userId: str
+    data: List[UserProductConfigItem]
+

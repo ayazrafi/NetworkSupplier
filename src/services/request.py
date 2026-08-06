@@ -1,9 +1,9 @@
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from bson import ObjectId
 from pymongo import ReturnDocument
 from src.config.db import DatabaseConnection
-from src.models.request import RequestCreateInput
+from src.models.request import RequestCreateInput, UserProductConfigInput
 from src.repositories.request import (
     OptimizationRequestsRepository,
     RequestPlantsRepository,
@@ -12,7 +12,8 @@ from src.repositories.request import (
     RequestSettingsRepository,
     RequestPlantSupplierMappingRepository,
     RequestConstraintsRepository,
-    RequestProductConfigurationsRepository
+    RequestProductConfigurationsRepository,
+    UserProductConfigRepository
 )
 
 class RequestService:
@@ -25,6 +26,8 @@ class RequestService:
         self.mapping_repository = RequestPlantSupplierMappingRepository()
         self.constraints_repository = RequestConstraintsRepository()
         self.product_config_repository = RequestProductConfigurationsRepository()
+        self.user_product_config_repository = UserProductConfigRepository()
+
 
     async def _generate_request_id(self) -> str:
         db = DatabaseConnection.get_db()
@@ -191,3 +194,34 @@ class RequestService:
             if "createdOn" in updated and isinstance(updated["createdOn"], datetime):
                 updated["createdOn"] = updated["createdOn"] + timedelta(hours=5, minutes=30)
         return updated
+
+    async def save_user_product_config(self, config_in: UserProductConfigInput) -> Dict[str, Any]:
+        doc = {
+            "groupId": config_in.groupId,
+            "userId": config_in.userId,
+            "data": [d.model_dump() for d in config_in.data],
+            "updatedOn": datetime.utcnow()
+        }
+        query = {"groupId": config_in.groupId, "userId": config_in.userId}
+        updated = await self.user_product_config_repository.collection.find_one_and_update(
+            query,
+            {"$set": doc},
+            upsert=True,
+            return_document=ReturnDocument.AFTER
+        )
+        if updated:
+            if "_id" in updated:
+                updated["_id"] = str(updated["_id"])
+            if "updatedOn" in updated and isinstance(updated["updatedOn"], datetime):
+                updated["updatedOn"] = updated["updatedOn"].isoformat()
+        return updated or doc
+
+    async def get_user_product_config(self, group_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        query = {"groupId": group_id, "userId": user_id}
+        result = await self.user_product_config_repository.collection.find_one(query)
+        if result and "_id" in result:
+            result["_id"] = str(result["_id"])
+        if result and "updatedOn" in result and isinstance(result["updatedOn"], datetime):
+            result["updatedOn"] = result["updatedOn"].isoformat()
+        return result
+
