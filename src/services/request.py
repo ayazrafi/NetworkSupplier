@@ -106,6 +106,7 @@ class RequestService:
             "OptimizationRequestId": opt_req_id,
             "maxDistance": request_in.maxDistance,
             "leaveQuantity": request_in.leaveQuantity,
+            "tripType": request_in.tripType,
             "createdOn": now
         }
         await self.settings_repository.create(settings_doc)

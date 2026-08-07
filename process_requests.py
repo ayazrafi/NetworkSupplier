@@ -443,6 +443,7 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         setting_doc = await settings_repo.collection.find_one({"requestId": request_id})
         max_distance = setting_doc.get("maxDistance", 0) if setting_doc else 0
         result_doc['MAX_DISTANCE'] = max_distance
+        result_doc['tripType'] = setting_doc.get("tripType") if setting_doc else None
         
         try:
             report_path = os.path.join(optimizer_solver.OUTPUT_FOLDER, f"reports_{request_id}.xlsx")

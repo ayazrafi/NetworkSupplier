@@ -52,6 +52,7 @@ class RequestCreateInput(BaseModel):
     plantSupplierMapping: List[RequestPlantSupplierMappingInput]
     maxDistance: int
     leaveQuantity: int = 0
+    tripType: Optional[str] = None
     constraints: Optional[List[RequestConstraintInput]] = []
     productConfiguration: Optional[List[RequestProductConfigurationInput]] = []
 
