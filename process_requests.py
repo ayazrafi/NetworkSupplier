@@ -142,6 +142,11 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
                 s = s[:-2]
             return s
 
+        # Fetch request constraints
+        constraints_repo = RequestConstraintsRepository()
+        req_constraints = await constraints_repo.collection.find({"requestId": request_id}).to_list(length=None)
+        constraints_map = {str(c.get("supplierCode", "")).strip(): c for c in req_constraints}
+
         # Fetch supplier milk summary data
         milk_summary_data = fetch_supplier_milk_summary(request_id)
         print(f"[milk_summary] Received {len(milk_summary_data)} summary records from API for jobId={request_id}")
@@ -251,7 +256,19 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
             grouped_veh = df_input_veh.groupby('SupplierCluster')
             for supp_code, group in grouped_veh:
                 supp_name = api_dict.get(str(supp_code), "")
-                veh_data = {"suppliercode": supp_code, "suppliername": supp_name}
+                
+                supp_constraints = constraints_map.get(str(supp_code).strip(), {})
+                is_lenient = supp_constraints.get("isLenient")
+                bmc_min = supp_constraints.get("bmcMinQuantitySupply", [])
+                plant_fixed = supp_constraints.get("plantFixedDemand", [])
+                
+                veh_data = {
+                    "suppliercode": supp_code, 
+                    "suppliername": supp_name,
+                    "isLenient": is_lenient,
+                    "bmcMinQuantitySupply": bmc_min,
+                    "plantFixedDemand": plant_fixed
+                }
                 for col in group.columns:
                     if col.startswith('V') and len(col) == 3:
                         veh_data[col] = int(group[col].sum())
