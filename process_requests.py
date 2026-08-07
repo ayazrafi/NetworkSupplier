@@ -102,8 +102,10 @@ async def process_excel_and_save(request_id, excel_path, master_dict):
         if not dynamic_milk_types:
             dynamic_milk_types = ['FCM', 'MM', 'BM', 'CM']
         
-        bmc_supp_map = dict(zip(df_map['BMCCode'].astype(str), df_map['Supplier']))
-        bmc_supp_code_map = dict(zip(df_map['BMCCode'].astype(str), df_map['SupplierCode']))
+        supp_col = df_map['Supplier'] if 'Supplier' in df_map.columns else pd.Series(dtype=str)
+        supp_code_col = df_map['SupplierCode'] if 'SupplierCode' in df_map.columns else supp_col
+        bmc_supp_map = dict(zip(df_map['BMCCode'].astype(str), supp_col))
+        bmc_supp_code_map = dict(zip(df_map['BMCCode'].astype(str), supp_code_col))
         
         veh_sheet = 'BMC Vehicle Allocation (Max Uti ' if 'BMC Vehicle Allocation (Max Uti ' in sheet_names else ('BMC Vehicle Allocation (Max Uti' if 'BMC Vehicle Allocation (Max Uti' in sheet_names else 'BMC Vehicle Allocation (Max Util)')
         df_veh = pd.read_excel(xls, veh_sheet) if veh_sheet in sheet_names else pd.DataFrame()
